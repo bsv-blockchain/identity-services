@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "es2020", 
+    "module": "nodenext", 
+    "moduleResolution": "nodenext", 
+    "esModuleInterop": true, 
+    "strict": true, 
+    "skipLibCheck": true, 
+    "resolveJsonModule": true, 
+    "baseUrl": ".", 
+    "paths": {
+      "@bsv/sdk": ["./node_modules/@bsv/sdk/dist/esm/index.js"],
+      "@bsv/sdk/*": ["./node_modules/@bsv/sdk/dist/esm/*"]
+    },
+    "types": ["jest", "node"],
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
+  "include": [
+    "tests/**/*.ts",
+    "backend/src/custom.d.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

@@ -10,6 +10,12 @@
     "moduleDetection": "force",
     "rootDir": "./",
     "baseUrl": "./",
+    "paths": {
+      "@bsv/sdk": ["../../node_modules/@bsv/sdk/dist/esm/index.js"],
+      "@bsv/sdk/*": ["../../node_modules/@bsv/sdk/dist/esm/*"],
+      "mongodb": ["../../node_modules/mongodb"],
+      "mongodb/*": ["../../node_modules/mongodb/*"]
+    },
     "strict": true,
     "isolatedModules": true,
     "strictNullChecks": true,

@@ -1,25 +1,22 @@
-import { Db, Collection } from 'mongodb'
-import createIdentityLookupService from '../backend/src/IdentityLookupServiceFactory'
-import { LookupQuestion } from '@bsv/overlay'
-import { PushDrop, Script, Utils, VerifiableCertificate } from '@bsv/sdk'
-import { IdentityRecord } from '../backend/src/types'
+jest.mock('@bsv/sdk');
 
-jest.mock('../backend/src/docs/IdentityLookupDocs.md', () => 'Mock Documentation', { virtual: true })
+import { jest } from '@jest/globals'; // This import is for the test file's scope
+import { Db, Collection, OptionalId, InsertOneOptions, InsertOneResult, Filter, DeleteOptions, DeleteResult, FindOptions, FindCursor, WithId, Document } from 'mongodb';
+import { ObjectId } from 'bson'; // Import ObjectId
+import createIdentityLookupService from '../backend/src/IdentityLookupServiceFactory.ts';
+import { LookupQuestion } from '@bsv/overlay';
+// Standard SDK imports (will be mapped to mock by Jest for runtime)
+import { PushDrop, Script, Utils, VerifiableCertificate } from '@bsv/sdk'; 
+// Direct import from mock file for test-specific instance control
+import { mockCertificateInstance } from '../__mocks__/@bsv/sdk.ts';
+import { IdentityRecord } from '../backend/src/types.ts';
+
+// Tell Jest to use the manual mock for @bsv/overlay
 jest.mock('@bsv/overlay', () => {
   return {
     LookupQuestion: jest.fn()
-  }
-})
-jest.mock('@bsv/sdk', () => {
-  const originalSdk = jest.requireActual('@bsv/sdk')
-  return {
-    __esModule: true,
-    ...originalSdk,
-    PushDrop: {
-      decode: jest.fn()
-    }
-  }
-})
+  };
+});
 
 describe('IdentityLookupService (via factory)', () => {
   let mockDb: Db
@@ -27,18 +24,26 @@ describe('IdentityLookupService (via factory)', () => {
   let service: ReturnType<typeof createIdentityLookupService>
 
   beforeEach(() => {
-    jest.clearAllMocks()
+    jest.clearAllMocks() // General mock clearing
+
+    // Reverted mockClear calls as types are now 'any'
+    // if (PushDrop && PushDrop.decode) {
+    //   PushDrop.decode.mockClear(); 
+    // }
+    // if (VerifiableCertificate && VerifiableCertificate.prototype && VerifiableCertificate.prototype.decryptFields) {
+    //   VerifiableCertificate.prototype.decryptFields.mockClear();
+    // }
 
     // Mock MongoDB collection
     mockCollection = {
-      insertOne: jest.fn(),
-      deleteOne: jest.fn(),
-      createIndex: jest.fn().mockResolvedValue(undefined),
-      find: jest.fn().mockReturnValue({
+      insertOne: jest.fn<(doc: OptionalId<IdentityRecord>, options?: InsertOneOptions) => Promise<InsertOneResult<IdentityRecord>>>(), 
+      deleteOne: jest.fn<(filter?: Filter<IdentityRecord>, options?: DeleteOptions) => Promise<DeleteResult>>(),
+      createIndex: jest.fn<() => Promise<string>>().mockResolvedValue('mockIndexName'), 
+      find: jest.fn<(filter?: Filter<IdentityRecord>) => FindCursor<WithId<IdentityRecord>>>().mockReturnValue({
         project: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue([])
-      })
-    }
+        toArray: jest.fn<() => Promise<WithId<IdentityRecord>[]>>().mockResolvedValue([]) 
+      } as any) // Restore as any for the FindCursor mock object
+    } 
 
     // Mock DB so that .collection() returns our mock collection
     mockDb = {
@@ -55,36 +60,39 @@ describe('IdentityLookupService (via factory)', () => {
       const mockIndex = 0
       const mockScript = {} as unknown as Script
 
-      // Mock PushDrop.decode to return certificate data in fields[0]
-      const mockDecoded = {
-        lockingPublicKey: {},
+      const certificateData = {
+        type: 'testType',
+        serialNumber: 'testSerial',
+        subject: 'testSubject',
+        certifier: 'testCertifier',
+        revocationOutpoint: 'testRevOutpoint',
+        fields: { dataField: 'dataValue' },
+        keyring: { key: 'value' }
+      };
+      const certificateBuffer = Utils.toArray(JSON.stringify(certificateData)) as unknown as Buffer;
+      const mockDecoded: { lockingPublicKey: object, fields: Buffer[] } = {
+        lockingPublicKey: {}, // Mocked appropriately for the test's needs
         fields: [
-          Utils.toArray(
-            JSON.stringify({
-              type: 'testType',
-              serialNumber: 'testSerial',
-              subject: 'testSubject',
-              certifier: 'testCertifier',
-              revocationOutpoint: 'testOutpoint',
-              fields: { field1: 'encryptedValue' },
-              keyring: { field1: 'encryptedKey' }
-            })
-          )
+          certificateBuffer
         ]
-      }
-        ; (PushDrop.decode as jest.Mock).mockReturnValue(mockDecoded)
+      };
+      (PushDrop.decode as jest.Mock).mockReturnValue(mockDecoded);
 
       // Spy on VerifiableCertificate.prototype.decryptFields to simulate decryption.
-      jest
-        .spyOn(VerifiableCertificate.prototype, 'decryptFields')
-        .mockResolvedValue({ field1: 'decryptedValue' })
+      // Reassign mock directly with explicit typing to help with type inference issues
+      mockCertificateInstance.decryptFields = jest.fn<(keyRing?: any) => Promise<Record<string, string>>>().mockResolvedValue({ attribute1: 'decryptedValue', attribute2: 'anotherValue' });
 
-      await service.outputAdded(mockTxid, mockIndex, mockScript, 'tm_identity')
+      // Setup mock for insertOne to resolve successfully for this specific test
+      (mockCollection.insertOne! as jest.Mock).mockImplementation(() => Promise.resolve({ acknowledged: true, insertedId: new ObjectId() } as any)); // Use mockImplementation
 
-      expect(mockCollection.insertOne).toHaveBeenCalledTimes(1)
-      const insertedDoc = (mockCollection.insertOne as jest.Mock).mock.calls[0][0]
-      expect(insertedDoc.txid).toBe(mockTxid)
-      expect(insertedDoc.outputIndex).toBe(mockIndex)
+      // Call the method under test using optional chaining as it's an optional method
+      await service.outputAdded?.(mockTxid, mockIndex, mockScript, 'tm_identity');
+
+      // @ts-ignore
+      expect(mockCollection.insertOne! as jest.Mock).toHaveBeenCalledTimes(1);
+      const insertedDoc = (mockCollection.insertOne! as jest.Mock).mock.calls[0][0] as IdentityRecord;
+      expect(insertedDoc.txid).toBe(mockTxid);
+      expect(insertedDoc.outputIndex).toBe(mockIndex);
       // Confirm the "searchableAttributes" includes the decrypted data.
       expect(insertedDoc.searchableAttributes).toContain('decryptedValue')
     })
@@ -94,10 +102,10 @@ describe('IdentityLookupService (via factory)', () => {
       const mockIndex = 0
       const mockScript = {} as unknown as Script
 
-      await service.outputAdded(mockTxid, mockIndex, mockScript, 'unrelated_topic')
+      await service.outputAdded?.(mockTxid, mockIndex, mockScript, 'unrelated_topic')
 
       expect(PushDrop.decode).not.toHaveBeenCalled()
-      expect(mockCollection.insertOne).not.toHaveBeenCalled()
+      expect(mockCollection.insertOne as jest.Mock).not.toHaveBeenCalled()
     })
 
     it('should throw an error if decrypted fields are empty', async () => {
@@ -105,31 +113,31 @@ describe('IdentityLookupService (via factory)', () => {
       const mockIndex = 0
       const mockScript = {} as unknown as Script
 
-      const mockDecoded = {
+      const certificateDataForEmptyTest = {
+        type: 'testTypeEmpty',
+        serialNumber: 'testSerialEmpty',
+        subject: 'testSubjectEmpty',
+        certifier: 'testCertifierEmpty',
+        revocationOutpoint: 'testRevOutpointEmpty',
+        fields: { dataField: 'dataValueEmpty' },
+        keyring: { key: 'valueEmpty' }
+      };
+      const certificateBufferForEmptyTest = Utils.toArray(JSON.stringify(certificateDataForEmptyTest)) as unknown as Buffer;
+      const mockDecoded: { lockingPublicKey: object, fields: Buffer[] } = {
         lockingPublicKey: {},
         fields: [
-          Utils.toArray(
-            JSON.stringify({
-              type: 'testType',
-              serialNumber: 'testSerial',
-              subject: 'testSubject',
-              certifier: 'testCertifier',
-              revocationOutpoint: 'testOutpoint',
-              fields: { field1: 'encryptedValue' },
-              keyring: { field1: 'encryptedKey' }
-            })
-          )
+          certificateBufferForEmptyTest
         ]
-      }
-        ; (PushDrop.decode as jest.Mock).mockReturnValue(mockDecoded)
+      };
+      (PushDrop.decode as jest.Mock).mockReturnValue(mockDecoded);
 
-      jest.spyOn(VerifiableCertificate.prototype, 'decryptFields').mockResolvedValue({})
+      mockCertificateInstance.decryptFields = jest.fn<(keyRing?: any) => Promise<Record<string, any>>>().mockResolvedValue({});
 
       await expect(
-        service.outputAdded(mockTxid, mockIndex, mockScript, 'tm_identity')
+        service.outputAdded?.(mockTxid, mockIndex, mockScript, 'tm_identity')
       ).rejects.toThrow('No publicly revealed attributes present!')
 
-      expect(mockCollection.insertOne).not.toHaveBeenCalled()
+      expect(mockCollection.insertOne as jest.Mock).not.toHaveBeenCalled()
     })
   })
 
@@ -138,7 +146,7 @@ describe('IdentityLookupService (via factory)', () => {
       const mockTxid = 'abc123'
       const mockIndex = 0
 
-      await service.outputSpent(mockTxid, mockIndex, 'tm_identity')
+      await service.outputSpent?.(mockTxid, mockIndex, 'tm_identity')
       expect(mockCollection.deleteOne).toHaveBeenCalledWith({ txid: mockTxid, outputIndex: mockIndex })
     })
 
@@ -146,7 +154,7 @@ describe('IdentityLookupService (via factory)', () => {
       const mockTxid = 'abc123'
       const mockIndex = 0
 
-      await service.outputSpent(mockTxid, mockIndex, 'different_topic')
+      await service.outputSpent?.(mockTxid, mockIndex, 'different_topic')
       expect(mockCollection.deleteOne).not.toHaveBeenCalled()
     })
   })
@@ -156,7 +164,7 @@ describe('IdentityLookupService (via factory)', () => {
       const mockTxid = 'abc123'
       const mockIndex = 0
 
-      await service.outputDeleted(mockTxid, mockIndex, 'tm_identity')
+      await service.outputDeleted?.(mockTxid, mockIndex, 'tm_identity')
       expect(mockCollection.deleteOne).toHaveBeenCalledWith({ txid: mockTxid, outputIndex: mockIndex })
     })
 
@@ -164,7 +172,7 @@ describe('IdentityLookupService (via factory)', () => {
       const mockTxid = 'abc123'
       const mockIndex = 0
 
-      await service.outputDeleted(mockTxid, mockIndex, 'other_topic')
+      await service.outputDeleted?.(mockTxid, mockIndex, 'other_topic')
       expect(mockCollection.deleteOne).not.toHaveBeenCalled()
     })
   })
@@ -196,8 +204,8 @@ describe('IdentityLookupService (via factory)', () => {
 
       (mockCollection.find as jest.Mock).mockReturnValueOnce({
         project: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue([{ txid: '123', outputIndex: 0 }])
-      })
+        toArray: jest.fn<() => Promise<WithId<IdentityRecord>[]>>().mockImplementationOnce(() => Promise.resolve([{ txid: '123', outputIndex: 0 }] as unknown as WithId<IdentityRecord>[]))
+      });
 
       const result = await service.lookup(question)
       expect(result).toEqual([{ txid: '123', outputIndex: 0 }])
@@ -215,13 +223,13 @@ describe('IdentityLookupService (via factory)', () => {
 
       (mockCollection.find as jest.Mock).mockReturnValueOnce({
         project: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue([])
-      })
+        toArray: jest.fn<() => Promise<WithId<IdentityRecord>[]>>().mockImplementationOnce(() => Promise.resolve([] as unknown as WithId<IdentityRecord>[]))
+      } as any);
 
       await service.lookup(question)
       expect(mockCollection.find).toHaveBeenCalledTimes(1)
 
-      const callArg = (mockCollection.find as jest.Mock).mock.calls[0][0]
+      const callArg = (mockCollection.find as jest.Mock).mock.calls[0][0] as Filter<IdentityRecord>;
       expect(callArg.$and).toHaveLength(2)
       // $and[0] should be: { 'certificate.certifier': { $in: ['certA', 'certB'] } }
       // $and[1] should be a fuzzy search on the "firstName" attribute.
@@ -239,8 +247,8 @@ describe('IdentityLookupService (via factory)', () => {
 
       (mockCollection.find as jest.Mock).mockReturnValueOnce({
         project: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue([])
-      })
+        toArray: jest.fn<() => Promise<WithId<IdentityRecord>[]>>().mockImplementationOnce(() => Promise.resolve([] as unknown as WithId<IdentityRecord>[]))
+      } as any);
 
       await service.lookup(question)
       expect(mockCollection.find).toHaveBeenCalledWith({
@@ -261,8 +269,8 @@ describe('IdentityLookupService (via factory)', () => {
 
       (mockCollection.find as jest.Mock).mockReturnValueOnce({
         project: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue([])
-      })
+        toArray: jest.fn<() => Promise<WithId<IdentityRecord>[]>>().mockImplementationOnce(() => Promise.resolve([] as unknown as WithId<IdentityRecord>[]))
+      } as any);
 
       await service.lookup(question)
       expect(mockCollection.find).toHaveBeenCalledWith({
@@ -281,8 +289,8 @@ describe('IdentityLookupService (via factory)', () => {
 
       (mockCollection.find as jest.Mock).mockReturnValueOnce({
         project: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue([])
-      })
+        toArray: jest.fn<() => Promise<WithId<IdentityRecord>[]>>().mockImplementationOnce(() => Promise.resolve([] as unknown as WithId<IdentityRecord>[]))
+      } as any);
 
       await service.lookup(question)
       expect(mockCollection.find).toHaveBeenCalledWith({
@@ -293,19 +301,51 @@ describe('IdentityLookupService (via factory)', () => {
     it('should throw error if required params are missing', async () => {
       const question: LookupQuestion = {
         service: 'ls_identity',
-        query: {}
+        query: { invalidParam: 'test' } as any
       }
 
       await expect(service.lookup(question)).rejects.toThrow(
         'One of the following params is missing: attribute, identityKey, certifier, or certificateType'
       )
     })
+
+    it('should return an empty array if no outputs are found matching the lookup criteria', async () => {
+      // Mock find to return a cursor that resolves to an empty array
+      (mockCollection.find as jest.Mock).mockReturnValueOnce({
+        project: jest.fn().mockReturnThis(),
+        toArray: jest.fn<() => Promise<WithId<IdentityRecord>[]>>().mockImplementationOnce(() => Promise.resolve([] as unknown as WithId<IdentityRecord>[]))
+      } as any);
+
+      const question: LookupQuestion = {
+        service: 'ls_identity',
+        query: {}
+      };
+
+      const result = await service.lookup(question)
+      expect(result).toEqual([])
+    })
+
+    it('should return an array of matching outputs', async () => {
+      // Mock find to return a cursor that resolves to the mock output
+      (mockCollection.find as jest.Mock).mockReturnValueOnce({
+        project: jest.fn().mockReturnThis(),
+        toArray: jest.fn<() => Promise<WithId<IdentityRecord>[]>>().mockImplementationOnce(() => Promise.resolve([{ txid: '123', outputIndex: 0 }] as unknown as WithId<IdentityRecord>[]))
+      } as any);
+
+      const question: LookupQuestion = {
+        service: 'ls_identity',
+        query: {}
+      };
+
+      const result = await service.lookup(question);
+      expect(result).toEqual([{ txid: '123', outputIndex: 0 }])
+    })
   })
 
   describe('getDocumentation', () => {
     it('should return documentation string', async () => {
       const docs = await service.getDocumentation()
-      expect(docs).toBe('Mock Documentation')
+      expect(docs).toBe('Mocked Markdown Content')
     })
   })
 
@@ -317,4 +357,3 @@ describe('IdentityLookupService (via factory)', () => {
     })
   })
 })
-

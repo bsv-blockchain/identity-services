@@ -2,10 +2,14 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "./",
-    "baseUrl": "./",
+    "baseUrl": "./", // Relative to backend directory
     "outDir": "./dist/types",
     "emitDeclarationOnly": true,
     "declaration": true,
-    "declarationMap": true
+    "declarationMap": true,
+    "paths": {
+      "@bsv/sdk": ["../node_modules/@bsv/sdk/dist/esm/index.js"], 
+      "@bsv/sdk/*": ["../node_modules/@bsv/sdk/dist/esm/*"]
+    }
   }
 }

@@ -1,6 +1,6 @@
 import { AdmittanceInstructions, TopicManager } from '@bsv/overlay'
-import { ProtoWallet, PushDrop, Transaction, Utils, VerifiableCertificate } from '@bsv/sdk'
-import docs from './docs/IdentityTopicManagerDocs.md.js'
+import * as bsv from '@bsv/sdk'
+import docs from './docs/IdentityTopicManagerDocs.md'
 
 /**
  * Implements a topic manager for Identity key registry
@@ -17,7 +17,7 @@ export default class IdentityTopicManager implements TopicManager {
     const outputsToAdmit: number[] = []
     try {
       console.log('Identity topic manager was invoked')
-      const parsedTransaction = Transaction.fromBEEF(beef)
+      const parsedTransaction = bsv.Transaction.fromBEEF(beef)
 
       // Validate params
       if (!Array.isArray(parsedTransaction.inputs) || parsedTransaction.inputs.length < 1) throw new Error('Missing parameter: inputs')
@@ -28,9 +28,9 @@ export default class IdentityTopicManager implements TopicManager {
       for (const [i, output] of parsedTransaction.outputs.entries()) {
         // Decode the Identity fields
         try {
-          const result = PushDrop.decode(output.lockingScript)
-          const parsedCert = JSON.parse(Utils.toUTF8(result.fields[0]))
-          const certificate = new VerifiableCertificate(
+          const result = bsv.PushDrop.decode(output.lockingScript)
+          const parsedCert = JSON.parse(bsv.Utils.toUTF8(result.fields[0]))
+          const certificate = new bsv.VerifiableCertificate(
             parsedCert.type,
             parsedCert.serialNumber,
             parsedCert.subject,
@@ -42,7 +42,7 @@ export default class IdentityTopicManager implements TopicManager {
           )
 
           // First, we ensure that the signature over the data is valid for the claimed identity key.
-          const anyoneWallet = new ProtoWallet('anyone')
+          const anyoneWallet = new bsv.ProtoWallet('anyone')
           const signature = result.fields.pop() as number[]
           const data = result.fields.reduce((a, e) => [...a, ...e], [])
 

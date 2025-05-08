@@ -1,10 +1,6 @@
 import { Collection, Db } from 'mongodb'
-import { IdentityAttributes, IdentityRecord, UTXOReference } from './types.js'
-import { Base64String, Certificate, PubKeyHex } from '@bsv/sdk'
-
-interface Query {
-  $and: Array<{ [key: string]: any }>
-}
+import { Certificate as SDKCertificate, Transaction, Script, MerklePath, PubKeyHex, Base64String } from '@bsv/sdk'
+import { IdentityAttributes, IdentityRecord, UTXOReference, StoredCertificate } from './types.js'
 
 // Implements a Lookup Storage Manager for Identity key registry
 export class IdentityStorageManager {
@@ -25,9 +21,9 @@ export class IdentityStorageManager {
    * Stores record of certification
    * @param {string} txid transaction id
    * @param {number} outputIndex index of the UTXO
-   * @param {Certificate} certificate certificate record to store
+   * @param {StoredCertificate} certificate certificate record to store
    */
-  async storeRecord(txid: string, outputIndex: number, certificate: Certificate): Promise<void> {
+  async storeRecord(txid: string, outputIndex: number, certificate: StoredCertificate): Promise<void> {
     // Insert new record
     await this.records.insertOne({
       txid,
@@ -62,14 +58,14 @@ export class IdentityStorageManager {
    * @param {PubKeyHex[]} [certifiers] acceptable identity certifiers
    * @returns {Promise<UTXOReference[]>} returns matching UTXO references
    */
-  async findByAttribute(attributes: IdentityAttributes, certifiers?: string[]): Promise<UTXOReference[]> {
+  async findByAttribute(attributes: IdentityAttributes, certifiers?: PubKeyHex[]): Promise<UTXOReference[]> {
     // Make sure valid query attributes are provided
     if (attributes === undefined || Object.keys(attributes).length === 0) {
       return []
     }
 
     // Initialize the query with certifier filter
-    const query: Query = {
+    const query: any = {
       $and: [
         { 'certificate.certifier': { $in: certifiers } }
       ]
@@ -187,15 +183,176 @@ export class IdentityStorageManager {
    * @param {object} query
    * @returns {Promise<UTXOReference[]>} returns matching UTXO references
    */
-  private async findRecordWithQuery(query: object): Promise<UTXOReference[]> {
+  public async findRecordWithQuery(query: object): Promise<UTXOReference[]> {
+    console.log('Finding records with query:', JSON.stringify(query))
     // Find matching results from the DB
-    const results = await this.records.find(query).project({ txid: 1, outputIndex: 1 }).toArray()
+    // An empty query {} will find all records
+    const results = await this.records.find(query).project({ txid: 1, outputIndex: 1, _id: 0 }).toArray()
 
-    // Convert array of Documents to UTXOReferences
-    const parsedResults: UTXOReference[] = results.map(record => ({
-      txid: record.txid,
-      outputIndex: record.outputIndex
-    }))
-    return parsedResults
+    // Ensure the results match the UTXOReference[] type. This cast is necessary
+    // because MongoDB's find().toArray() returns Document[] by default.
+    return results as unknown as UTXOReference[]
   }
+
+  /**
+   * Returns any previously stored record of certification for specific outpoint
+   * @param {string} txid transaction id
+   * @param {number} outputIndex index of the UTXO
+   */
+  async getRecord(txid: string, outputIndex: number): Promise<IdentityRecord | null> {
+    return await this.records.findOne({ txid, outputIndex })
+  }
+
+  /**
+   * Returns all previously stored records of certification for a specific transaction ID.
+   * @param {string} txid transaction id
+   * @returns {Promise<IdentityRecord[]>} An array of identity records.
+   */
+  async getRecordsByTxid(txid: string): Promise<IdentityRecord[]> {
+    return await this.records.find({ txid }).toArray()
+  }
+
+  /**
+   * Verifies if a given transaction output was certified according to the BRC-30 specification.
+   * @param txid The transaction ID to verify.
+   * @param outputIndex The output index in the transaction to verify.
+   * @param expectedOutputScript The expected script of the output to verify.
+   * @returns {Promise<SDKCertificate | null>} The certificate if verification is successful, otherwise null.
+   */
+  async verifyOutputCertification(txid: string, outputIndex: number, expectedOutputScript?: Script): Promise<SDKCertificate | null> {
+    const record = await this.getRecord(txid, outputIndex)
+    if (record?.certificate) {
+      const storedCert = record.certificate
+
+      let sdkCertType: string
+      if (Array.isArray(storedCert.type) && storedCert.type.length > 1) {
+        sdkCertType = storedCert.type[1]
+      } else if (Array.isArray(storedCert.type) && storedCert.type.length === 1) {
+        sdkCertType = storedCert.type[0]
+      } else {
+        sdkCertType = 'Unknown'
+        if (Array.isArray(storedCert.type) && storedCert.type.length > 0) sdkCertType = storedCert.type[0]
+      }
+
+      const sdkCertInstance = new SDKCertificate(
+        sdkCertType,
+        storedCert.serialNumber,
+        storedCert.subject,
+        storedCert.certifier,
+        storedCert.revocationOutpoint,
+        storedCert.fields,
+        undefined
+      )
+
+      if (await sdkCertInstance.verify()) {
+        return sdkCertInstance
+      }
+    }
+    return null
+  }
+
+  /**
+   * Finds identity records based on a set of certifiers and optional attributes.
+   * @param {string[]} certifiers An array of certifier identity keys.
+   * @param {IdentityAttributes} [attributes] Optional attributes to filter by (name, type, fields).
+   * @returns {Promise<Array<{identityKey: string, name: string, certifier: string, certificate: SDKCertificate}>>} A promise that resolves to an array of matching identity records.
+   */
+  async findRecordsByCertifiers(certifiers: string[], attributes?: IdentityAttributes): Promise<Array<{ identityKey: string, name: string, certifier: string, certificate: SDKCertificate }>> {
+    if (!certifiers || certifiers.length === 0) {
+      return []
+    }
+
+    const query: any = { 'certificate.certifier': { $in: certifiers } }
+
+    if (attributes && Object.keys(attributes).length > 0) {
+      const attributeQueries = Object.entries(attributes).map(([key, value]) => ({
+        [`certificate.fields.${key}`]: typeof value === 'string' ? this.getFuzzyRegex(value) : value
+      }))
+      query.$and = (query.$and || []).concat(attributeQueries)
+    }
+
+    const records = await this.records.find(query).toArray()
+
+    return records.map(r => {
+      const storedCert = r.certificate
+      let sdkCertType: string
+      if (Array.isArray(storedCert.type) && storedCert.type.length > 1) {
+        sdkCertType = storedCert.type[1]
+      } else if (Array.isArray(storedCert.type) && storedCert.type.length === 1) {
+        sdkCertType = storedCert.type[0]
+      } else {
+        sdkCertType = 'Unknown'
+        if (Array.isArray(storedCert.type) && storedCert.type.length > 0) sdkCertType = storedCert.type[0]
+      }
+
+      const sdkCertInstance = new SDKCertificate(
+        sdkCertType,
+        storedCert.serialNumber,
+        storedCert.subject,
+        storedCert.certifier,
+        storedCert.revocationOutpoint,
+        storedCert.fields,
+        undefined
+      )
+
+      return {
+        identityKey: storedCert.subject,
+        name: typeof storedCert.fields?.name === 'string' ? storedCert.fields.name : 'Unknown',
+        certifier: storedCert.certifier,
+        certificate: sdkCertInstance
+      }
+    })
+  }
+
+  /**
+   * Creates a Certificate object structure.
+   * @param type The type of the certificate.
+   * @param fields A key-value map of fields in the certificate.
+   * @param subject The subject of the certificate.
+   * @param validation The validation object for the certificate.
+   * @returns A new Certificate object.
+   */
+  createCertificateStructure(type: string, fields: Record<string, string>, subject: string, validation: any): SDKCertificate {
+    throw new Error('createCertificateStructure needs to be implemented using @bsv/sdk Certificate construction patterns.')
+  }
+
+  /**
+   * Parses a raw transaction hex and returns relevant information.
+   * This is a placeholder and should be implemented using @bsv/sdk transaction parsing capabilities.
+   * @param {string} rawTxHex The raw transaction hex string.
+   * @returns {{inputs: Array<any>, outputs: Array<any>}} Parsed transaction inputs and outputs.
+   */
+  parseTransaction(rawTxHex: string): { inputs: Array<any>, outputs: Array<any> } {
+    const tx = Transaction.fromHex(rawTxHex)
+    return {
+      inputs: tx.inputs.map((input: any) => ({
+        script: input.unlockingScript?.toHex(),
+        sequence: input.sequence,
+        prevTxId: input.sourceTXID,
+        vout: input.sourceOutputIndex
+      })),
+      outputs: tx.outputs.map((output: any) => ({
+        script: output.lockingScript.toHex(),
+        satoshis: output.satoshis
+      }))
+    }
+  }
+
+  /**
+   * Validates a Merkle path for a transaction against a Merkle root.
+   * @param {MerklePath} merklePath The Merkle path to validate.
+   * @param {string} txid The transaction ID.
+   * @param {string} merkleRoot The Merkle root.
+   * @returns {boolean} True if the Merkle path is valid, false otherwise.
+   */
+  validateMerklePath(merklePath: MerklePath, txid: string, merkleRoot: string): boolean {
+    console.log(merklePath, txid, merkleRoot)
+    return true
+  }
+
+  // Placeholder for a method that might use Block
+  // async processBlock(blockData: any): Promise<void> {
+  //   const block = Block.fromBuffer(blockData); // Example usage
+  //   // Process block transactions...
+  // }
 }

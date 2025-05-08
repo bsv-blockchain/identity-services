@@ -1,4 +1,5 @@
-import { IdentityTopicManager } from '../backend/src/IdentityTopicManager'
+import { jest, describe, beforeEach, it, expect } from '@jest/globals';
+import IdentityTopicManager from '../backend/src/IdentityTopicManager.ts'
 import type { AdmittanceInstructions } from '@bsv/overlay'
 import docs from '../backend/src/docs/IdentityTopicManagerDocs.md'
 import {
