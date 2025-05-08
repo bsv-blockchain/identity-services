@@ -64,22 +64,26 @@ export const mockCertificateInstance = {
   fields: { initialField: 'initialValue' },
   keyring: { someKey: 'someValue' },
   decryptFields: jest.fn<(keyRing?: any) => Promise<Record<string, string>>>(async (keyRing?: any) => mockDecryptedFields),
+  verify: jest.fn().mockResolvedValue(true) // Added verify mock
 };
 // This mocks the VerifiableCertificate constructor
 export const VerifiableCertificate = jest.fn((_type, _serial, _subject, _certifier, _revocation, _fields, _keyring) => mockCertificateInstance);
 
 // Alias Certificate to VerifiableCertificate for IdentityStorageManager compatibility
-export const Certificate = jest.fn().mockImplementation((type, serialNumber, subject, certifier, revocationOutpoint, fields, signature) => {
+export const Certificate = jest.fn().mockImplementation((payload, type, serialNumber, subject, certifier, revocationOutpoint, fields, signature) => {
   // Return a new object that merges mockCertificateInstance with any provided fields,
   // ensuring the fields passed to the constructor override the defaults.
   const instance = {
     ...mockCertificateInstance, // Spread default values first
-    type: type || mockCertificateInstance.type, // Use provided or default
-    serialNumber: serialNumber || mockCertificateInstance.serialNumber,
-    subject: subject || mockCertificateInstance.subject,
-    certifier: certifier || mockCertificateInstance.certifier,
-    revocationOutpoint: revocationOutpoint || mockCertificateInstance.revocationOutpoint,
-    // Use the provided signature directly, as it's passed in by the test
+    // Use provided values, falling back to defaults from mockCertificateInstance if necessary.
+    // The 'payload' is part of the SDKCertificate constructor but not typically stored as a top-level property named 'payload' on the instance itself in the same way.
+    // It's used internally or to derive other properties. We won't explicitly store 'payload' here unless the actual SDK does.
+    type: type !== undefined ? type : mockCertificateInstance.type,
+    serialNumber: serialNumber !== undefined ? serialNumber : mockCertificateInstance.serialNumber,
+    subject: subject !== undefined ? subject : mockCertificateInstance.subject,
+    certifier: certifier !== undefined ? certifier : mockCertificateInstance.certifier,
+    revocationOutpoint: revocationOutpoint !== undefined ? revocationOutpoint : mockCertificateInstance.revocationOutpoint,
+    // Use the provided signature directly
     signature: signature,
     // Explicitly handle fields: use provided `fields` if they exist, otherwise default.
     fields: fields !== undefined ? fields : mockCertificateInstance.fields
