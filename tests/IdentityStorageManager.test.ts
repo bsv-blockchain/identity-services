@@ -5,7 +5,10 @@ import { jest } from '@jest/globals';
 import { Collection, Db, InsertOneResult, DeleteResult, Document, ObjectId } from 'mongodb'
 import { IdentityStorageManager } from '../backend/src/IdentityStorageManager.js'
 import { IdentityRecord, StoredCertificate, UTXOReference, IdentityAttributes } from '../backend/src/types.js'
-import { Certificate as SDKCertificate } from '@bsv/sdk' // This is the mocked SDKCertificate
+// Use require for the mock as a workaround for TS/Jest module resolution issues
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const SdkMocked = require('@bsv/sdk');
+const { Certificate: SDKCertificate, mockVerify } = SdkMocked;
 
 // Declare ActualSDKCertificate here, will be assigned in beforeAll
 let ActualSDKCertificate: typeof SDKCertificate;
@@ -453,96 +456,100 @@ describe('IdentityStorageManager', () => {
         return { project: jest.fn().mockReturnThis(), toArray: jest.fn<() => Promise<UTXOReference[]>>().mockResolvedValue([]) }; // Default empty for safety
       })
 
-      const result = await manager.findRecordWithQuery({ 'certificate.fields.custom': 'value' })
+      const result = await (manager as any).findRecordWithQuery({ 'certificate.fields.custom': 'value' })
       expect(result.length).toBe(1);
       expect(result[0]).toEqual(partialRecordForQuery) // Expecting UTXOReference from mockCursorWithPartialRecord
     })
   })
 
   describe('verifyOutputCertification', () => {
-    let verifySpy: ReturnType<typeof jest.spyOn> // This will spy on the MOCKED SDKCertificate.prototype.verify
-
     beforeEach(() => {
-      // Spy on the MOCKED SDKCertificate.prototype.verify
-      // The manager uses the mocked SDKCertificate, so we spy on its prototype's verify method
-      verifySpy = jest.spyOn(SDKCertificate.prototype, 'verify');
-    });
-
-    afterEach(() => {
-      verifySpy.mockRestore(); // Restore original implementation after each test
+      // Clear the mockVerify before each test to ensure clean state
+      mockVerify.mockClear();
+      // Set a default behavior (e.g., verification passes) that can be overridden in specific tests
+      mockVerify.mockResolvedValue(true);
     });
 
     it('should return an SDKCertificate if output is certified and verification passes', async () => {
-      const record: IdentityRecord = {
-        txid: 'certifyTxid',
+      mockVerify.mockResolvedValueOnce(true); // Ensure verify passes for this test
+      const mockRecord: IdentityRecord = {
+        _id: new ObjectId(),
+        txid: 'txid1',
         outputIndex: 0,
-        certificate: { type: ['VerifiableCredential'], serialNumber: 'certifySerial', subject: 'sV', certifier: 'cV', revocationOutpoint: 'roV', fields: {} } as StoredCertificate,
+        certificate: { type: ['VerifiableCredential'], serialNumber: 'testSerial', subject: 'sV', certifier: 'cV', revocationOutpoint: 'roV', fields: {} } as StoredCertificate,
         createdAt: new Date(),
         searchableAttributes: ''
       }
       const mockCursorForVerify = { 
         project: jest.fn().mockReturnThis(),
-        toArray: jest.fn<() => Promise<IdentityRecord[]>>().mockResolvedValue([record])
+        toArray: jest.fn<() => Promise<IdentityRecord[]>>().mockResolvedValue([mockRecord])
       };
       (mockCollection.find as jest.Mock).mockImplementationOnce((query: any) => {
-        if (query.txid === 'certifyTxid' && query.outputIndex === 0) return mockCursorForVerify;
+        if (query.txid === 'txid1' && query.outputIndex === 0) return mockCursorForVerify;
         return defaultMockCursorForFullRecords; // Fallback, though not expected to be hit here
       })
-      verifySpy.mockResolvedValue(true); // Simulate successful SDKCertificate.verify()
 
-      const result = await manager.verifyOutputCertification('certifyTxid', 0, undefined)
+      const result = await manager.verifyOutputCertification('txid1', 0)
+
+      expect(mockCollection.find).toHaveBeenCalledWith({ txid: 'txid1', outputIndex: 0 })
+      expect(mockVerify).toHaveBeenCalled(); // Check if verify was called
       expect(result).toBeInstanceOf(SDKCertificate)
-      expect(result?.serialNumber).toBe('certifySerial')
+      expect(result?.serialNumber).toBe('testSerial')
       expect(result?.type).toEqual('VerifiableCredential') // Assert first type
-      expect(verifySpy).toHaveBeenCalled();
     })
 
     it('should return null if output is certified but SDKCertificate.verify() fails', async () => {
-      const record: IdentityRecord = {
-        txid: 'certifyFailTxid',
+      mockVerify.mockResolvedValueOnce(false); // Ensure verify fails for this test
+      const mockRecord: IdentityRecord = {
+        _id: new ObjectId(),
+        txid: 'txid1',
         outputIndex: 1,
-        certificate: { type: ['VerifiableCredential'], serialNumber: 'certifyFailSerial', subject: 'sF', certifier: 'cF', revocationOutpoint: 'roF', fields: {} } as StoredCertificate,
+        certificate: { type: ['VerifiableCredential'], serialNumber: 'testSerial', subject: 'sV', certifier: 'cV', revocationOutpoint: 'roV', fields: {} } as StoredCertificate,
         createdAt: new Date(),
         searchableAttributes: ''
       }
       const mockCursorForVerifyFail = { 
         project: jest.fn().mockReturnThis(),
-        toArray: jest.fn<() => Promise<IdentityRecord[]>>().mockResolvedValue([record])
+        toArray: jest.fn<() => Promise<IdentityRecord[]>>().mockResolvedValue([mockRecord])
       };
       (mockCollection.find as jest.Mock).mockImplementationOnce((query: any) => {
-        if (query.txid === 'certifyFailTxid' && query.outputIndex === 1) return mockCursorForVerifyFail;
+        if (query.txid === 'txid1' && query.outputIndex === 1) return mockCursorForVerifyFail;
         return defaultMockCursorForFullRecords;
       })
-      verifySpy.mockResolvedValue(false); // Simulate failed SDKCertificate.verify()
 
-      const result = await manager.verifyOutputCertification('certifyFailTxid', 1, undefined)
+      const result = await manager.verifyOutputCertification('txid1', 1)
+
+      expect(mockCollection.find).toHaveBeenCalledWith({ txid: 'txid1', outputIndex: 1 })
+      expect(mockVerify).toHaveBeenCalled(); // Check if verify was called
       expect(result).toBeNull()
-      expect(verifySpy).toHaveBeenCalled();
     })
 
     it('should return an SDKCertificate if output is certified but revoked, IF SDKCertificate.verify() passes (current behavior)', async () => {
-      const record: IdentityRecord = {
-        txid: 'certifyRevokedTxid',
+      mockVerify.mockResolvedValueOnce(true); // Ensure verify passes
+      const mockRecord: IdentityRecord = {
+        _id: new ObjectId(),
+        txid: 'txid1',
         outputIndex: 1,
-        certificate: { type: ['VerifiableCredential', 'BRC52IdentityCertificate'], serialNumber: 'certifyRevokedSerial', subject: 'sR', certifier: 'cR', revocationOutpoint: 'roR', fields: {} } as StoredCertificate,
+        certificate: { type: ['VerifiableCredential', 'BRC52IdentityCertificate'], serialNumber: 'testSerial', subject: 'sV', certifier: 'cV', revocationOutpoint: 'roV', fields: {} } as StoredCertificate,
         createdAt: new Date(),
         searchableAttributes: ''
       }
       const mockCursorForRevoked = { 
         project: jest.fn().mockReturnThis(),
-        toArray: jest.fn<() => Promise<IdentityRecord[]>>().mockResolvedValue([record])
+        toArray: jest.fn<() => Promise<IdentityRecord[]>>().mockResolvedValue([mockRecord])
       };
       (mockCollection.find as jest.Mock).mockImplementationOnce((query: any) => {
-        if (query.txid === 'certifyRevokedTxid' && query.outputIndex === 1) return mockCursorForRevoked;
+        if (query.txid === 'txid1' && query.outputIndex === 1) return mockCursorForRevoked;
         return defaultMockCursorForFullRecords;
       })
-      verifySpy.mockResolvedValue(true); // Simulate successful SDKCertificate.verify(), despite record being revoked
 
-      const result = await manager.verifyOutputCertification('certifyRevokedTxid', 1, undefined)
+      const result = await manager.verifyOutputCertification('txid1', 1)
+
+      expect(mockCollection.find).toHaveBeenCalledWith({ txid: 'txid1', outputIndex: 1 })
+      expect(mockVerify).toHaveBeenCalled(); // Check if verify was called
       expect(result).toBeInstanceOf(SDKCertificate) // Current implementation returns cert if verify() passes
-      expect(result?.serialNumber).toBe('certifyRevokedSerial')
+      expect(result?.serialNumber).toBe('testSerial')
       expect(result?.type).toEqual('VerifiableCredential') // Assert first type
-      expect(verifySpy).toHaveBeenCalled();
     })
 
     it('should return null if output is not certified (no record found)', async () => {
@@ -556,7 +563,10 @@ describe('IdentityStorageManager', () => {
       })
       // verifySpy will not be called if no record is found, so no need to mock its return for this case specifically
 
-      const result = await manager.verifyOutputCertification('notCertifiedTxid', 2, undefined)
+      const result = await manager.verifyOutputCertification('notCertifiedTxid', 2)
+
+      expect(mockCollection.find).toHaveBeenCalledWith({ txid: 'notCertifiedTxid', outputIndex: 2 })
+      expect(mockVerify).not.toHaveBeenCalled(); // Ensure verify was NOT called
       expect(result).toBeNull()
     })
   })

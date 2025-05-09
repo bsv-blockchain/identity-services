@@ -1,4 +1,5 @@
 import { Base64String, Certificate as SDKCertificate, PubKeyHex } from '@bsv/sdk'
+import { ObjectId } from 'mongodb';
 
 export interface UTXOReference {
   txid: string
@@ -23,6 +24,7 @@ export interface StoredCertificate {
 }
 
 export interface IdentityRecord {
+  _id?: ObjectId;
   txid: string
   outputIndex: number
   certificate: StoredCertificate; // Use the new StoredCertificate type
