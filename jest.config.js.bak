@@ -1,0 +1,16 @@
+// jest.config.js
+/** @type {import('ts-jest').JestConfigWithTsJest} */
+export default {
+  preset: 'ts-jest/presets/default-esm', // Configures ts-jest for ES Module support
+  testEnvironment: 'node',
+  // By default, Jest doesn't transform node_modules.
+  // This pattern tells Jest to transform @bsv/sdk but continue ignoring other node_modules.
+  // It achieves this by matching anything in node_modules *not* starting with @bsv/sdk.
+  transformIgnorePatterns: [
+    '/node_modules/(?!(@bsv/sdk)/)', // The '?!' is a negative lookahead.
+                                     // It means: "ignore paths in node_modules UNLESS they start with @bsv/sdk"
+    '\\.pnp\\.[^\\/]+$' // A default Jest ignore pattern for PnP environments
+  ],
+  // The 'ts-jest/presets/default-esm' preset should handle the 'transform' option
+  // correctly for .ts/.tsx files, enabling ESM-aware transpilation.
+};

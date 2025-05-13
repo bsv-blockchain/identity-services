@@ -1,8 +1,6 @@
 import { IdentityStorageManager } from './IdentityStorageManager.js'
 import { AdmissionMode, LookupAnswer, LookupFormula, LookupQuestion, LookupService, OutputAdmittedByTopic, OutputSpent, SpendNotificationMode } from '@bsv/overlay'
-import { ProtoWallet, PushDrop, Utils, VerifiableCertificate } from '@bsv/sdk'
-import docs from './docs/IdentityLookupDocs.md.js'
-import { LookupAnswer, LookupFormula, LookupQuestion, LookupService } from '@bsv/overlay'
+import { ProtoWallet, PushDrop, Utils, VerifiableCertificate, Script } from '@bsv/sdk'
 import docs from './docs/IdentityLookupDocs.md'
 import { IdentityQuery, StoredCertificate } from './types.js'
 import { Db } from 'mongodb'
@@ -24,6 +22,7 @@ class IdentityLookupService implements LookupService {
     console.log(`Identity lookup service outputAdded called with ${txid}.${outputIndex}`)
     // Decode the Identity token fields from the Bitcoin outputScript
     const result = PushDrop.decode(lockingScript)
+  }
 
   /**
    * Notifies the lookup service of a new output added.
@@ -36,13 +35,13 @@ class IdentityLookupService implements LookupService {
    * @returns {Promise<void>} A promise that resolves when the processing is complete.
    * @throws Will throw an error if there is an issue with storing the record in the storage engine.
    */
-  async outputAdded?(txid: string, outputIndex: number, outputScript: bsv.Script, topic: string): Promise<void> {
+  async outputAdded?(txid: string, outputIndex: number, outputScript: Script, topic: string): Promise<void> {
     if (topic !== 'tm_identity') return
     console.log(`Identity lookup service outputAdded called with ${txid}.${outputIndex}`)
     // Decode the Identity token fields from the Bitcoin outputScript
-    const result = bsv.PushDrop.decode(outputScript)
-    const parsedCert = JSON.parse(bsv.Utils.toUTF8(result.fields[0]))
-    const sdkCertificate = new bsv.VerifiableCertificate(
+    const result = PushDrop.decode(outputScript)
+    const parsedCert = JSON.parse(Utils.toUTF8(result.fields[0]))
+    const sdkCertificate = new VerifiableCertificate(
       parsedCert.type, // This might be a string or already an array if source data supports it
       parsedCert.serialNumber,
       parsedCert.subject,
@@ -53,7 +52,7 @@ class IdentityLookupService implements LookupService {
     )
 
     // Decrypt certificate fields
-    const decryptedFields = await sdkCertificate.decryptFields(new bsv.ProtoWallet('anyone'))
+    const decryptedFields = await sdkCertificate.decryptFields(new ProtoWallet('anyone'))
     if (Object.keys(decryptedFields).length === 0) throw new Error('No publicly revealed attributes present!')
 
     // Construct the StoredCertificate object

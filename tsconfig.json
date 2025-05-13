@@ -8,10 +8,7 @@
     "skipLibCheck": true, 
     "resolveJsonModule": true, 
     "baseUrl": ".", 
-    "paths": {
-      "@bsv/sdk": ["./node_modules/@bsv/sdk/dist/esm/index.js"],
-      "@bsv/sdk/*": ["./node_modules/@bsv/sdk/dist/esm/*"]
-    },
+    "paths": {},
     "types": ["jest", "node"],
     "isolatedModules": true,
     "allowImportingTsExtensions": true,

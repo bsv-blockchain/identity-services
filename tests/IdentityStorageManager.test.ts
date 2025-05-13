@@ -10,8 +10,11 @@ import { IdentityRecord, StoredCertificate, UTXOReference, IdentityAttributes } 
 const SdkMocked = require('@bsv/sdk');
 const { Certificate: SDKCertificate, mockVerify } = SdkMocked;
 
-// Declare ActualSDKCertificate here, will be assigned in beforeAll
-let ActualSDKCertificate: typeof SDKCertificate;
+// Import the actual Certificate class from the loader, using .ts extension
+import { ActualSDKCertificate as RealSDKCertificateClass } from './sdk-actual-loader.ts';
+
+// Declare ActualSDKCertificate here, its type will be based on the real class
+let ActualSDKCertificate: typeof RealSDKCertificateClass;
 
 // Mock the entire mongodb library
 describe('IdentityStorageManager', () => {
@@ -21,9 +24,8 @@ describe('IdentityStorageManager', () => {
   let defaultMockCursorForFullRecords: { project: jest.Mock; toArray: jest.Mock<() => Promise<IdentityRecord[]>> }
 
   beforeAll(async () => {
-    // Dynamically import the actual SDK for spying
-    const actualSdk = await import('@bsv/sdk');
-    ActualSDKCertificate = actualSdk.Certificate;
+    // Assign the real SDK Certificate class
+    ActualSDKCertificate = RealSDKCertificateClass;
 
     // Prepare a mocked Db and Collection
     mockCollection = {
@@ -42,26 +44,52 @@ describe('IdentityStorageManager', () => {
     const defaultMockCursorForPartials = {
       project: jest.fn().mockReturnThis(),
       toArray: jest.fn<() => Promise<Partial<IdentityRecord>[]>>().mockResolvedValue([])
-    }
-    // For general cases where specific mockImplementationOnce is not used, or for findRecordWithQuery
-    mockCollection.find.mockReturnValue(defaultMockCursorForPartials as any);
+    };
 
-    // Fallback cursor for methods expecting full IdentityRecord[]
     defaultMockCursorForFullRecords = {
-      project: jest.fn().mockReturnThis(), 
-      toArray: jest.fn<() => Promise<IdentityRecord[]>>().mockResolvedValue([])
+        project: jest.fn().mockReturnThis(), // For chained calls
+        toArray: jest.fn<() => Promise<IdentityRecord[]>>().mockResolvedValue([])
     };
 
     mockDb = {
-      collection: jest.fn().mockReturnValue(mockCollection)
-    } as any
-  })
+      collection: jest.fn().mockReturnValue(mockCollection),
+    } as unknown as jest.Mocked<Db>
+
+    manager = new IdentityStorageManager(mockDb as Db)
+    // await manager.initialize() // Removed: createIndex is called in constructor
+  });
 
   beforeEach(() => {
-    jest.clearAllMocks()
-    manager = new IdentityStorageManager(mockDb)
-  })
+    // Clear all mock call counts and implementations before each test
+    jest.clearAllMocks();
 
+    // Reset the default behavior for find and project for cursors
+    // Ensure mockCollection.find always returns a default cursor that can be further customized
+    // Default behavior for find().toArray() for full records:
+    defaultMockCursorForFullRecords = {
+      project: jest.fn().mockReturnThis(),
+      toArray: jest.fn<() => Promise<IdentityRecord[]>>().mockResolvedValue([])
+    };
+    // Default behavior for find().project().toArray() for partial records:
+    const partialCursor = {
+        toArray: jest.fn<() => Promise<Partial<IdentityRecord>[]>>().mockResolvedValue([]),
+    };
+    const fullCursorWithProject = {
+        project: jest.fn().mockReturnValue(partialCursor),
+        toArray: defaultMockCursorForFullRecords.toArray // Keep direct toArray on main cursor
+    };
+
+    (mockCollection.find as jest.Mock).mockReturnValue(fullCursorWithProject);
+
+    // Re-apply mock implementation for createIndex if it was cleared by clearAllMocks
+    // or if specific tests might alter it.
+    mockCollection.createIndex.mockResolvedValue('indexName');
+    mockCollection.insertOne.mockResolvedValue({ acknowledged: true, insertedId: new ObjectId() } as InsertOneResult<Document>);
+    mockCollection.deleteOne.mockResolvedValue({ acknowledged: true, deletedCount: 1 } as DeleteResult);
+
+  });
+
+  // Test suite for constructor and initialize
   describe('constructor', () => {
     it('should create and store the collection', () => {
       expect(mockDb.collection).toHaveBeenCalledWith('identityRecords')
@@ -456,9 +484,12 @@ describe('IdentityStorageManager', () => {
         return { project: jest.fn().mockReturnThis(), toArray: jest.fn<() => Promise<UTXOReference[]>>().mockResolvedValue([]) }; // Default empty for safety
       })
 
-      const result = await (manager as any).findRecordWithQuery({ 'certificate.fields.custom': 'value' })
-      expect(result.length).toBe(1);
-      expect(result[0]).toEqual(partialRecordForQuery) // Expecting UTXOReference from mockCursorWithPartialRecord
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const results = await (manager as any).findRecordWithQuery({ 'certificate.fields.custom': 'value' })
+      expect(mockCollection.find).toHaveBeenCalledWith({ 'certificate.fields.custom': 'value' })
+      expect(results).toEqual([
+        { txid: 'txidQuery', outputIndex: 0 }
+      ])
     })
   })
 
