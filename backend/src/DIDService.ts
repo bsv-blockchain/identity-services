@@ -1,8 +1,9 @@
 import { DidDocument, VerificationMethod } from './types.js';
 // We will likely need key generation utilities. 
 // Assuming @bsv/sdk provides what we need, e.g., for generating secp256k1 keys.
-import { PrivateKey, PublicKey } from '@bsv/sdk'; 
-import bs58 from 'bs58'; // For Base58BTC encoding
+import { PrivateKey, PublicKey } from '@bsv/sdk';
+import { toBase58, fromBase58 } from '@bsv/sdk/primitives/utils';
+// import bs58 from 'bs58'; // For Base58BTC encoding - Replaced by @bsv/sdk
 
 // The multiformats/multicodec part is for did:key encoding of the public key
 // We might need a library for this, or @bsv/sdk might handle it.
@@ -24,23 +25,29 @@ export class DIDService {
    * @returns A promise that resolves to an object containing the DID, its corresponding
    *          DID Document (using Multikey type), and the private key (as hex).
    */
-  public async createDidKey(): Promise<{
+  /**
+   * Constructs a did:key identifier and its DID Document from a given public key hex string.
+   * The public key is represented using publicKeyMultibase with a 'z' prefix,
+   * indicating base58btc encoding of the multicodec-prefixed public key.
+   *
+   * @param publicKeyHex - The public key in hexadecimal string format.
+   * @returns A promise that resolves to an object containing the DID and its corresponding DID Document.
+   */
+  public async constructDidFromPublicKeyHex(publicKeyHex: string): Promise<{
     did: string;
     document: DidDocument;
-    privateKeyHex: string;
   }> {
-    const privateKey = PrivateKey.fromRandom();
-    const publicKeyInstance = privateKey.toPublicKey();
-    const privateKeyHex = privateKey.toHex();
-    const compressedPublicKeyBytes = Uint8Array.from(publicKeyInstance.encode(true) as number[]);
+    const publicKeyInstance = PublicKey.fromString(publicKeyHex);
+    // Ensure the public key is compressed (did:key typically uses compressed keys)
+    const compressedPublicKeyBytes = publicKeyInstance.encode(true);
 
     const bufferToEncode = new Uint8Array(
       MULTICODEC_SECP256K1_PUB_HEADER.length + compressedPublicKeyBytes.length
     );
     bufferToEncode.set(MULTICODEC_SECP256K1_PUB_HEADER);
-    bufferToEncode.set(compressedPublicKeyBytes, MULTICODEC_SECP256K1_PUB_HEADER.length);
+    bufferToEncode.set(compressedPublicKeyBytes as unknown as number[], MULTICODEC_SECP256K1_PUB_HEADER.length);
 
-    const publicKeyMultibase = `z${bs58.encode(bufferToEncode)}`;
+    const publicKeyMultibase = `z${toBase58(bufferToEncode as unknown as number[])}`; // Pass Uint8Array directly
     const did = `${DID_KEY_PREFIX}${publicKeyMultibase}`;
     const verificationMethodId = `${did}#${publicKeyMultibase}`; // For Multikey, fragment is the multibase key itself
 
@@ -67,7 +74,6 @@ export class DIDService {
     return {
       did,
       document,
-      privateKeyHex,
     };
   }
 
@@ -92,7 +98,7 @@ export class DIDService {
     let decodedBytes: Uint8Array;
     try {
       // Remove 'z' prefix for bs58 decoding
-      decodedBytes = bs58.decode(publicKeyMultibase.substring(1));
+      decodedBytes = new Uint8Array(fromBase58(publicKeyMultibase.substring(1)));
     } catch (e) {
       throw new Error('Invalid did:key: Failed to decode base58btc public key.');
     }

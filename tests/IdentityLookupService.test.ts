@@ -8,7 +8,7 @@ import { LookupQuestion } from '@bsv/overlay';
 // Standard SDK imports (will be mapped to mock by Jest for runtime)
 import { PushDrop, Script, Utils, VerifiableCertificate } from '@bsv/sdk'; 
 // Direct import from mock file for test-specific instance control
-import { mockCertificateInstance } from '../__mocks__/@bsv/sdk.ts';
+import { mockCertificateInstance, mockDecryptFieldsForVerifiableCertificate } from '../__mocks__/@bsv/sdk.ts';
 import { IdentityRecord } from '../backend/src/types.ts';
 
 // Tell Jest to use the manual mock for @bsv/overlay
@@ -33,6 +33,7 @@ describe('IdentityLookupService (via factory)', () => {
     // if (VerifiableCertificate && VerifiableCertificate.prototype && VerifiableCertificate.prototype.decryptFields) {
     //   VerifiableCertificate.prototype.decryptFields.mockClear();
     // }
+    mockDecryptFieldsForVerifiableCertificate.mockClear();
 
     // Mock MongoDB collection
     mockCollection = {
@@ -80,7 +81,7 @@ describe('IdentityLookupService (via factory)', () => {
 
       // Spy on VerifiableCertificate.prototype.decryptFields to simulate decryption.
       // Reassign mock directly with explicit typing to help with type inference issues
-      mockCertificateInstance.decryptFields = jest.fn<(keyRing?: any) => Promise<Record<string, string>>>().mockResolvedValue({ attribute1: 'decryptedValue', attribute2: 'anotherValue' });
+      mockDecryptFieldsForVerifiableCertificate.mockResolvedValueOnce({ attribute1: 'decryptedValue', attribute2: 'anotherValue' });
 
       // Setup mock for insertOne to resolve successfully for this specific test
       (mockCollection.insertOne! as jest.Mock).mockImplementation(() => Promise.resolve({ acknowledged: true, insertedId: new ObjectId() } as any)); // Use mockImplementation
@@ -131,7 +132,7 @@ describe('IdentityLookupService (via factory)', () => {
       };
       (PushDrop.decode as jest.Mock).mockReturnValue(mockDecoded);
 
-      mockCertificateInstance.decryptFields = jest.fn<(keyRing?: any) => Promise<Record<string, any>>>().mockResolvedValue({});
+      mockDecryptFieldsForVerifiableCertificate.mockResolvedValueOnce({});
 
       await expect(
         service.outputAdded?.(mockTxid, mockIndex, mockScript, 'tm_identity')
@@ -146,7 +147,12 @@ describe('IdentityLookupService (via factory)', () => {
       const mockTxid = 'abc123'
       const mockIndex = 0
 
-      await service.outputSpent?.(mockTxid, mockIndex, 'tm_identity')
+      await service.outputSpent?.({
+        txid: mockTxid,
+        outputIndex: mockIndex,
+        topic: 'tm_identity',
+        mode: 'none'
+      })
       expect(mockCollection.deleteOne).toHaveBeenCalledWith({ txid: mockTxid, outputIndex: mockIndex })
     })
 
@@ -154,7 +160,12 @@ describe('IdentityLookupService (via factory)', () => {
       const mockTxid = 'abc123'
       const mockIndex = 0
 
-      await service.outputSpent?.(mockTxid, mockIndex, 'different_topic')
+      await service.outputSpent?.({
+        txid: mockTxid,
+        outputIndex: mockIndex,
+        topic: 'different_topic',
+        mode: 'none'
+      })
       expect(mockCollection.deleteOne).not.toHaveBeenCalled()
     })
   })

@@ -24,6 +24,15 @@ class IdentityLookupService implements LookupService {
     const result = PushDrop.decode(lockingScript)
   }
 
+  async outputDeleted(txid: string, outputIndex: number, topic: string): Promise<void> {
+    if (topic !== 'tm_identity') {
+      // console.log(`IdentityLookupService: outputDeleted for topic ${topic} ignored.`);
+      return;
+    }
+    // console.log(`IdentityLookupService: outputDeleted called for ${txid}.${outputIndex} with topic ${topic}. Deleting record.`);
+    await this.storageManager.deleteRecord(txid, outputIndex);
+  }
+
   /**
    * Notifies the lookup service of a new output added.
    *

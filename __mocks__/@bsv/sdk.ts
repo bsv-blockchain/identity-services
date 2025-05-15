@@ -1,143 +1,224 @@
-// /Users/jake/Desktop/identity-services/__mocks__/@bsv/sdk.ts
-import { jest } from '@jest/globals'; // For jest.fn()
+// /Users/jake/Desktop/quarkID/identity-services/__mocks__/@bsv/sdk.ts
+import { jest } from '@jest/globals'; // Import the full 'jest' object
 
-// --- Renaming original exports to avoid conflicts before default export ---
-
-// PublicKey
-const mockPublicKeyInstance_local = {
+const mockPublicKeyInstance = {
   toHex: jest.fn(() => '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'),
+  encode: jest.fn((compressed?: boolean) => {
+    const bytes = new Uint8Array(compressed ?? true ? 33 : 65);
+    bytes[0] = compressed ?? true ? 0x02 : 0x04;
+    for (let i = 1; i < bytes.length; i++) bytes[i] = (i * 7) % 256;
+    return bytes;
+  }),
   toBytes: jest.fn(() => {
     const bytes = new Uint8Array(33);
     bytes[0] = 0x02;
     for (let i = 1; i < 33; i++) bytes[i] = (i * 5) % 256;
     return bytes;
   }),
-  encode: jest.fn((_compressed?: boolean) => {
-    const mockEncodedBytes = new Uint8Array(33);
-    mockEncodedBytes[0] = _compressed ? 0x02 : 0x04;
-    for (let i = 1; i < 33; i++) mockEncodedBytes[i] = (i * 7) % 256;
-    return mockEncodedBytes;
+};
+
+const mockPrivateKeyInstance = {
+  toHex: jest.fn(() => 'mockPrivateKeyHex1234567890abcdef1234567890abcdef1234567890abcdef'),
+  toPublicKey: jest.fn(() => mockPublicKeyInstance),
+};
+
+export const PublicKey = {
+  fromString: jest.fn((_str: string) => mockPublicKeyInstance),
+  fromHex: jest.fn((_hex: string) => mockPublicKeyInstance),
+};
+
+export const PrivateKey = {
+  fromRandom: jest.fn((_hex: string) => mockPrivateKeyInstance), 
+  fromHex: jest.fn((_hex: string) => mockPrivateKeyInstance),
+};
+
+const certificateStaticVerifyMock = jest.fn((/* params certificate.verify might take */) => true); 
+
+export const Certificate = jest.fn().mockImplementation(
+  (type?: string[] | string, serialNumber?: string, subject?: any, issuer?: any, validFrom?: string, validUntil?: string, keyring?: any, signature?: string) => {
+    let actualType: string[];
+    if (Array.isArray(type)) {
+      actualType = type;
+    } else if (typeof type === 'string') {
+      actualType = [type];
+    } else {
+      actualType = ['VerifiableCredential']; // Default type
+    }
+
+    return {
+      type: actualType,
+      serialNumber: serialNumber || 'mockCertSerialDefaultWhenArgUndefined', // More specific default
+      subject: subject || { commonName: 'mockCertSubjectDefault' },
+      issuer: issuer || { commonName: 'mockCertIssuerDefault' },
+      validFrom: validFrom || '2024-01-01T00:00:00Z',
+      validUntil: validUntil || '2025-01-01T00:00:00Z',
+      keyring: keyring || { getSigningPublicKey: () => 'mockSigningPublicKey' },
+      signature: signature || 'mockDigitalSignature123',
+      verify: jest.fn(() => true),
+      decryptFields: jest.fn(async (_key?: any) => ({ mockFieldFromCert: 'mockValueFromCert' })),
+      getField: jest.fn((fieldName: string) => `mockFieldValue_${fieldName}_FromCert`),
+      encode: jest.fn(() => 'encodedMockCertData')
+    };
+  }
+);
+
+(Certificate as any).verify = certificateStaticVerifyMock; // Static verify method
+export const mockVerify = certificateStaticVerifyMock; // Export the static verify mock
+
+export const PushDrop = {
+  decode: jest.fn((script: any) => {
+    if (script && typeof script.toString === 'function' && script.toString('hex') === 'INVALID_EMPTY_SCRIPT_HEX_FOR_TEST') {
+      return { fields: []  };
+    }
+    return {
+      fields: [Buffer.from(JSON.stringify({ 
+        type: ['VerifiableCredential', 'BirthCertificate'],
+        serialNumber: 'SERIAL12345',
+        subject: { name: 'Mock Subject' },
+        issuer: { name: 'Mock Issuer' },
+        validFrom: '2023-01-01',
+        validUntil: '2028-01-01',
+        customField: 'CustomValue123'
+      }))]
+    };
   })
 };
-const PublicKey_local = {
-  fromHex: jest.fn((_hex: string) => mockPublicKeyInstance_local),
+
+// Define the shape of the instance Script creates
+type MockScriptInstance = {
+  toHex: jest.Mock<() => "INVALID_EMPTY_SCRIPT_HEX_FOR_TEST" | "mockScriptHex">;
+  toString: jest.Mock<(format?: "hex" | "asm") => string>;
 };
 
-// PrivateKey
-const mockPrivateKeyInstance_local = {
-  toHex: jest.fn(() => 'a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8'),
-  toPublicKey: jest.fn(() => mockPublicKeyInstance_local),
-};
-const PrivateKey_local = {
-  fromRandom: jest.fn(() => mockPrivateKeyInstance_local),
-  fromHex: jest.fn((_hex: string) => mockPrivateKeyInstance_local),
-};
+// Define the type of the Script constructor
+type ScriptConstructorMock = new (asm?: string) => MockScriptInstance;
 
-// Transaction Parts
-const mockUnlockingScript_local = { toHex: jest.fn(() => 'mockUnlockingScriptHex') };
-const mockLockingScript_local = { toHex: jest.fn(() => 'mockLockingScriptHex') };
-
-const mockTransactionInstance_local = {
-  inputs: [
-    { unlockingScript: mockUnlockingScript_local, sourceTXID: 'mockSourceTxidInput1', sourceOutputIndex: 0, sequence: 1 }
-  ],
-  outputs: [
-    { lockingScript: mockLockingScript_local, satoshis: 1000 }
-  ],
-  toHex: jest.fn(() => 'mockTransactionHex12345'),
-};
-const Transaction_local = {
-  fromHex: jest.fn((_hex: string) => mockTransactionInstance_local),
-};
-
-const mockDecryptedFields_local = { attribute1: 'value1', attribute2: 'value2' };
-
-const mockCertificateInstance_local = {
-  type: 'MockCertType',
-  serialNumber: 'MockSN123',
-  subject: 'mockSubjectXYZ',
-  certifier: 'mockCertifierABC',
-  revocationOutpoint: 'mockRevOutpoint0123',
-  fields: { initialField: 'initialValue' },
-  keyring: { someKey: 'someValue' },
-  decryptFields: jest.fn<(keyRing?: any) => Promise<Record<string, string>>>(async (keyRing?: any) => mockDecryptedFields_local),
-};
-
-const mockVerify_local = jest.fn<() => Promise<boolean>>().mockResolvedValue(true);
-
-const VerifiableCertificate_local = jest.fn((_type, _serial, _subject, _certifier, _revocation, _fields, _keyring) => ({
-  ...mockCertificateInstance_local,
-  verify: mockVerify_local,
-  type: _type || mockCertificateInstance_local.type,
-  serialNumber: _serial || mockCertificateInstance_local.serialNumber,
-  subject: _subject || mockCertificateInstance_local.subject,
-  certifier: _certifier || mockCertificateInstance_local.certifier,
-  revocationOutpoint: _revocation || mockCertificateInstance_local.revocationOutpoint,
-  fields: _fields || mockCertificateInstance_local.fields,
-  keyring: _keyring || mockCertificateInstance_local.keyring
-}));
-
-const Certificate_local = jest.fn().mockImplementation((payload, type, serialNumber, subject, certifier, revocationOutpoint, fields, signature) => {
-  const instance = {
-    ...mockCertificateInstance_local, 
-    type: type !== undefined ? type : mockCertificateInstance_local.type,
-    serialNumber: serialNumber !== undefined ? serialNumber : mockCertificateInstance_local.serialNumber,
-    subject: subject !== undefined ? subject : mockCertificateInstance_local.subject,
-    certifier: certifier !== undefined ? certifier : mockCertificateInstance_local.certifier,
-    revocationOutpoint: revocationOutpoint !== undefined ? revocationOutpoint : mockCertificateInstance_local.revocationOutpoint,
-    signature: signature,
-    fields: fields !== undefined ? fields : mockCertificateInstance_local.fields,
-    verify: mockVerify_local
+// Define the actual implementation for the constructor logic
+const scriptConstructorLogic = (asm?: string): MockScriptInstance => {
+  return {
+    toHex: jest.fn(() => asm === '' ? 'INVALID_EMPTY_SCRIPT_HEX_FOR_TEST' : 'mockScriptHex'),
+    toString: jest.fn((format?: 'hex' | 'asm') => {
+      if (format === 'hex') {
+        return asm === '' ? 'INVALID_EMPTY_SCRIPT_HEX_FOR_TEST' : 'mockScriptHex';
+      }
+      return asm || 'MOCK_ASM_SCRIPT';
+    }),
   };
-  return instance;
+};
+
+export const Script = jest.fn(scriptConstructorLogic) as unknown as ScriptConstructorMock;
+
+export const Signature = {
+  fromDER: jest.fn(() => ({ toDER: () => 'mockDERString' })),
+  fromRS: jest.fn(() => ({ toDER: () => 'mockDERString' }))
+};
+
+// Mock for Transaction instance methods
+const mockTransactionInstance = {
+  sign: jest.fn(() => Promise.resolve(mockTransactionInstance)), // Often returns itself or void
+  toHex: jest.fn(() => 'mockTransactionHex_010203abcdef'),
+  broadcast: jest.fn(() => Promise.resolve({ txid: 'mocktxid123abc', status: 'success' })),
+  // Add other instance methods if needed, e.g.:
+  // addInput: jest.fn(() => mockTransactionInstance),
+  // addOutput: jest.fn(() => mockTransactionInstance),
+  // verify: jest.fn(() => true),
+  // fee: jest.fn(() => 1000),
+  // id: 'mockTxIdInstance',
+};
+
+// An instance of a mock certificate, for tests that need to import a ready-made instance
+export const mockCertificateInstance = {
+  type: ['VerifiableCredential', 'MockInstanceCredential'],
+  serialNumber: 'mockInstanceSerial123',
+  subject: { commonName: 'Mock Instance Subject' },
+  issuer: { commonName: 'Mock Instance Issuer' }, // 'certifier' in some contexts might map to 'issuer'
+  validFrom: '2024-01-01T00:00:00Z',
+  validUntil: '2025-01-01T00:00:00Z',
+  keyring: { getSigningPublicKey: () => 'mockInstanceSigningPublicKey' },
+  signature: 'mockInstanceDigitalSignature123',
+  verify: jest.fn(() => true), // Instance verify method
+  decryptFields: jest.fn(async (_key?: any) => ({ // Make _key optional to align with test usage
+    defaultDecryptedField: 'defaultDecryptedValue',
+    // This will often be overridden in tests, but a default mock is good.
+  })),
+  getField: jest.fn((fieldName: string) => `mockInstanceFieldValue_${fieldName}`),
+  encode: jest.fn(() => 'encodedMockCertificateInstanceData'),
+  // Add any other methods if tests show they are needed on this specific instance
+};
+
+// Mock for Transaction static methods (and potentially constructor if used with `new`)
+export const Transaction = {
+  fromHex: jest.fn((_hex: string) => mockTransactionInstance),
+  // If Transaction is instantiated with `new Transaction()`, you might need:
+  // new: jest.fn(() => mockTransactionInstance) and then adjust the export like other constructors.
+  // For now, assuming static fromHex is the primary usage.
+};
+
+export const Utils = {
+  someUtilityFunction: jest.fn(() => 'mockedUtilValue'),
+  toArray: jest.fn((str: string): Uint8Array => {
+    const arr = new Uint8Array(str.length);
+    for (let i = 0; i < str.length; i++) {
+      arr[i] = str.charCodeAt(i);
+    }
+    return arr;
+  }),
+  toUTF8: jest.fn((bytes: Uint8Array | Buffer | number[]): string => {
+    if (!bytes || bytes.length === 0) return '';
+    let result = '';
+    const byteArray = bytes instanceof Uint8Array || Buffer.isBuffer(bytes) ? bytes : new Uint8Array(bytes);
+    for (let i = 0; i < byteArray.length; i++) {
+      result += String.fromCharCode(byteArray[i]);
+    }
+    return result;
+  }),
+};
+
+export const ProtoWallet = jest.fn().mockImplementation((config) => {
+  return {
+    config: config,
+  };
 });
 
-const PushDrop_local = {
-  decode: jest.fn((_script: any) => ({
-    fields: [ Buffer.from(JSON.stringify({
-      type: 'PushDropCertType',
-      serialNumber: 'PD_SN789',
-      subject: 'pdSubject456',
-      certifier: 'pdCertifier789',
-      revocationOutpoint: 'pdRevOut456',
-      fields: { pdField1: 'pdValue1' },
-      keyring: { pdKey: 'pdVal'}
-    })) ]
-  })),
-};
-
-const ProtoWallet_local = jest.fn((_seedOrKey: any) => ({
+// New exportable mock for VerifiableCertificate's decryptFields
+export const mockDecryptFieldsForVerifiableCertificate = jest.fn(async (_key?: any) => ({
+  defaultInternalVCField: 'defaultInternalVCValue' // A distinct default
 }));
 
-const Utils_local = {
-  toUTF8: jest.fn((bytes: Uint8Array | Buffer) => Buffer.from(bytes).toString('utf8')),
-  toArray: jest.fn((data: any): Buffer => { 
-    if (typeof data === 'string') {
-      return Buffer.from(data); 
-    }
-    return Buffer.from(JSON.stringify(data));
-  })
-};
+export const VerifiableCertificate = jest.fn().mockImplementation((type, serialNumber, subject, issuer, validFrom, validUntil, keyring, signature) => {
+  return {
+    type: type || ['VerifiableCredential', 'CustomTestCredential'],
+    serialNumber: serialNumber || 'mockVCSerialNumber123',
+    subject: subject || { commonName: 'Mock Subject Common Name' },
+    issuer: issuer || { commonName: 'Mock Issuer Common Name' },
+    validFrom: validFrom || '2024-01-01T00:00:00Z',
+    validUntil: validUntil || '2025-01-01T00:00:00Z',
+    keyring: keyring || { getSigningPublicKey: () => 'mockSigningPublicKey' },
+    signature: signature || 'mockDigitalSignature123',
+    verify: jest.fn(() => true), 
+    decryptFields: mockDecryptFieldsForVerifiableCertificate, // Use the new exportable mock
+    getField: jest.fn((fieldName) => {
+      if (fieldName === 'customField') return 'mockCustomFieldValue';
+      return 'defaultMockFieldValue';
+    }),
+    encode: jest.fn(() => 'encodedMockVCInstanceData')
+  };
+});
 
-const Script_local = {
-  fromHex: jest.fn((hex: string) => ({ 
-    toHex: jest.fn(() => hex), 
-  })),
-};
+export const toBase58 = jest.fn((data: Uint8Array): string => {
+  let str = 'z';
+  for (let i = 0; i < Math.min(data.length, 10); i++) {
+    str += String.fromCharCode(65 + (data[i] % 26));
+  }
+  return str;
+});
 
-// Default export containing all mocked entities
-export default {
-  PublicKey: PublicKey_local,
-  PrivateKey: PrivateKey_local,
-  Transaction: Transaction_local,
-  mockCertificateInstance: mockCertificateInstance_local, 
-  VerifiableCertificate: VerifiableCertificate_local,
-  Certificate: Certificate_local,
-  mockVerify: mockVerify_local, 
-  PushDrop: PushDrop_local,
-  ProtoWallet: ProtoWallet_local,
-  Utils: Utils_local,
-  Script: Script_local,
-};
+export const fromBase58 = jest.fn((str: string): Uint8Array => {
+  const arr = new Uint8Array(str.length -1);
+  for (let i = 1; i < str.length; i++) {
+    arr[i-1] = str.charCodeAt(i) - 65;
+  }
+  return arr;
+});
 
-export const __esModule = true; // Crucial for ESM mocks
+export const __esModule = true;

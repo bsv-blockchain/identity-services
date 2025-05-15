@@ -5,16 +5,15 @@ import { jest } from '@jest/globals';
 import { Collection, Db, InsertOneResult, DeleteResult, Document, ObjectId } from 'mongodb'
 import { IdentityStorageManager } from '../backend/src/IdentityStorageManager.js'
 import { IdentityRecord, StoredCertificate, UTXOReference, IdentityAttributes } from '../backend/src/types.js'
-// Use require for the mock as a workaround for TS/Jest module resolution issues
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const SdkMocked = require('@bsv/sdk');
+// Using ES import for the mocked SDK module
+import * as SdkMocked from '@bsv/sdk';
 const { Certificate: SDKCertificate, mockVerify } = SdkMocked;
 
-// Import the actual Certificate class from the loader, using .ts extension
-import { ActualSDKCertificate as RealSDKCertificateClass } from './sdk-actual-loader.ts';
+// Import the promise/loader function from the loader
+import { ActualSDKCertificatePromise } from './sdk-actual-loader.ts';
 
 // Declare ActualSDKCertificate here, its type will be based on the real class
-let ActualSDKCertificate: typeof RealSDKCertificateClass;
+let ActualSDKCertificate: any; // Type will be resolved from the promise
 
 // Mock the entire mongodb library
 describe('IdentityStorageManager', () => {
@@ -23,9 +22,9 @@ describe('IdentityStorageManager', () => {
   let manager: IdentityStorageManager
   let defaultMockCursorForFullRecords: { project: jest.Mock; toArray: jest.Mock<() => Promise<IdentityRecord[]>> }
 
-  beforeAll(async () => {
-    // Assign the real SDK Certificate class
-    ActualSDKCertificate = RealSDKCertificateClass;
+  beforeAll(async () => { // Make beforeAll async
+    // Assign the real SDK Certificate class by awaiting the promise
+    ActualSDKCertificate = await ActualSDKCertificatePromise;
 
     // Prepare a mocked Db and Collection
     mockCollection = {
