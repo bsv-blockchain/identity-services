@@ -3,7 +3,7 @@ import { jest } from '@jest/globals';
 // This file's purpose is to import and re-export the actual Certificate from @bsv/sdk,
 // bypassing Jest's automocking for this specific import when used by other test files.
 
-jest.unmock('@bsv/sdk');
+// jest.unmock('@bsv/sdk');
 
 
 

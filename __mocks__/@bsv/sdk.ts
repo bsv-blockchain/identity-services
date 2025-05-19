@@ -1,5 +1,22 @@
-// /Users/jake/Desktop/quarkID/identity-services/__mocks__/@bsv/sdk.ts
-import { jest } from '@jest/globals'; // Import the full 'jest' object
+// __mocks__/@bsv/sdk.ts
+import { jest } from '@jest/globals';
+
+// Define StoredCertificate interface locally for the mock's clarity
+// This should match the one in your actual types.ts
+interface StoredCertificate {
+  type: string[];
+  serialNumber: string;
+  subject: any;
+  certifier: any;
+  validation?: {
+    validFrom?: string;
+    validUntil?: string;
+  };
+  fields?: Record<string, any>;
+  signature?: string;
+  revocationOutpoint?: string;
+}
+
 
 const mockPublicKeyInstance = {
   toHex: jest.fn(() => '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'),
@@ -28,197 +45,163 @@ export const PublicKey = {
 };
 
 export const PrivateKey = {
-  fromRandom: jest.fn((_hex: string) => mockPrivateKeyInstance), 
+  fromRandom: jest.fn((_hex: string) => mockPrivateKeyInstance),
   fromHex: jest.fn((_hex: string) => mockPrivateKeyInstance),
 };
 
-const certificateStaticVerifyMock = jest.fn((/* params certificate.verify might take */) => true); 
+export const certificateStaticVerifyMock = jest.fn<(...args: any[]) => Promise<boolean>>(async () => {
+  console.log('DEBUG_STATIC_VERIFY_MOCK: certificateStaticVerifyMock CALLED');
+  return true;
+});
+export const mockVerify = certificateStaticVerifyMock; // Export for test access
 
-export const Certificate = jest.fn().mockImplementation(
-  (type?: string[] | string, serialNumber?: string, subject?: any, issuer?: any, validFrom?: string, validUntil?: string, keyring?: any, signature?: string) => {
-    let actualType: string[];
-    if (Array.isArray(type)) {
-      actualType = type;
-    } else if (typeof type === 'string') {
-      actualType = [type];
-    } else {
-      actualType = ['VerifiableCredential']; // Default type
-    }
+export const mockInstanceVerifyForVerifiableCertificate = jest.fn(async (keyring?: any) => {
+  console.log('DEBUG_VERIFY_MOCK: mockInstanceVerifyForVerifiableCertificate CALLED', { keyring });
+  return true;
+});
 
-    return {
-      type: actualType,
-      serialNumber: serialNumber || 'mockCertSerialDefaultWhenArgUndefined', // More specific default
-      subject: subject || { commonName: 'mockCertSubjectDefault' },
-      issuer: issuer || { commonName: 'mockCertIssuerDefault' },
-      validFrom: validFrom || '2024-01-01T00:00:00Z',
-      validUntil: validUntil || '2025-01-01T00:00:00Z',
-      keyring: keyring || { getSigningPublicKey: () => 'mockSigningPublicKey' },
-      signature: signature || 'mockDigitalSignature123',
-      verify: jest.fn(() => true),
-      decryptFields: jest.fn(async (_key?: any) => ({ mockFieldFromCert: 'mockValueFromCert' })),
-      getField: jest.fn((fieldName: string) => `mockFieldValue_${fieldName}_FromCert`),
-      encode: jest.fn(() => 'encodedMockCertData')
-    };
+export const mockDecryptFieldsForVerifiableCertificate = jest.fn(async (_key?: any) => ({
+  defaultInternalVCField: 'defaultInternalVCValue'
+}));
+
+// This is the primary mock for Certificate / VerifiableCertificate
+export const Certificate = jest.fn().mockImplementation((...args: any[]) => {
+  // Initialize fallback values
+  let finalType: string[] = ['DefaultFallbackType'];
+  let finalSerialNumber: string = 'defaultFallbackSerialNumber';
+  let finalSubject: any = { commonName: 'DefaultFallbackSubject' };
+  let finalIssuer: any = { commonName: 'DefaultFallbackIssuer' };
+  let finalValidFrom: string | undefined = '1999-01-01T00:00:00Z';
+  let finalValidUntil: string | undefined = '1999-01-02T00:00:00Z';
+  let finalKeyring: any = undefined;
+  let finalSignature: string | undefined = 'defaultFallbackSignature';
+  let finalFields: Record<string, any> | undefined = { defaultFallbackField: 'value' };
+  let finalRevocationOutpoint: string | undefined = 'defaultFallbackRevocation.0';
+
+  // console.log('DEBUG_MOCK_CERT_CONSTRUCTOR: Called with args:', JSON.stringify(args));
+
+  // Check for single StoredCertificate object argument
+  if (args.length === 1 && args[0] && typeof args[0] === 'object' && 
+      args[0].serialNumber !== undefined && typeof args[0].serialNumber === 'string' && 
+      Array.isArray(args[0].type)) {
+    
+    const sc = args[0] as StoredCertificate;
+    // console.log('DEBUG_MOCK_CERT_CONSTRUCTOR: Detected single StoredCertificate object argument.');
+    finalType = sc.type;
+    finalSerialNumber = sc.serialNumber;
+    finalSubject = sc.subject;
+    finalIssuer = sc.certifier; 
+    finalValidFrom = sc.validation?.validFrom;
+    finalValidUntil = sc.validation?.validUntil;
+    finalSignature = sc.signature;
+    finalFields = sc.fields;
+    finalRevocationOutpoint = sc.revocationOutpoint;
+
+  // Check for multi-argument constructor style (type, serialNumber, subject, issuer, revocationOutpoint, fields, signature)
+  // Order based on usage in IdentityStorageManager.findRecordsByCertifiers
+  } else if (args.length >= 4) { // Minimum: type, serialNumber, subject, issuer
+    // console.log('DEBUG_MOCK_CERT_CONSTRUCTOR: Detected multi-argument constructor style.');
+    
+    if (typeof args[0] === 'string') { // Type argument
+      finalType = [args[0]]; 
+    } else if (Array.isArray(args[0])) {
+      finalType = args[0];
+    } // Else: Type has unexpected format, uses fallback
+
+    if (typeof args[1] === 'string') { // serialNumber argument
+      finalSerialNumber = args[1];
+    } // Else: SerialNumber not a string, uses fallback
+    
+    finalSubject = args[2]; // subject argument
+    finalIssuer = args[3];  // issuer (certifier) argument
+    
+    // Optional arguments based on usage: revocationOutpoint, fields, signature
+    finalRevocationOutpoint = (args.length > 4 && args[4] !== undefined) ? args[4] : undefined;
+    finalFields = (args.length > 5 && args[5] !== undefined) ? args[5] : {}; 
+    if (args.length > 5 && args[5] !== undefined) finalFields = args[5];
+    finalSignature = (args.length > 6 && args[6] !== undefined) ? args[6] : undefined;
+    
+  } else {
+    // console.log('DEBUG_MOCK_CERT_CONSTRUCTOR: Constructor arguments not recognized, using fallbacks. Args:', JSON.stringify(args));
   }
-);
 
-(Certificate as any).verify = certificateStaticVerifyMock; // Static verify method
-export const mockVerify = certificateStaticVerifyMock; // Export the static verify mock
+  return {
+    type: finalType,
+    serialNumber: finalSerialNumber,
+    subject: finalSubject,
+    issuer: finalIssuer,
+    validFrom: finalValidFrom,
+    validUntil: finalValidUntil,
+    keyring: finalKeyring, 
+    signature: finalSignature,
+    fields: finalFields,
+    revocationOutpoint: finalRevocationOutpoint,
+    verify: mockInstanceVerifyForVerifiableCertificate, // CRITICAL for verifyOutputCertification tests
+    decryptFields: mockDecryptFieldsForVerifiableCertificate, 
+    getField: jest.fn((fieldName: string) => { 
+      if (finalFields && typeof finalFields === 'object' && fieldName in finalFields) {
+        return finalFields[fieldName];
+      }
+      // Return a consistent mock value if field not found, or undefined
+      return undefined; // Or `mockFieldValueFor_${fieldName}` if that's preferred test behavior
+    }),
+    encode: jest.fn(() => 'encodedMockVCInstanceData'), 
+    getAttributes: jest.fn(() => finalFields), // Ensure this is present
+  };
+}); // Correct closing for Certificate mockImplementation
 
+// Assign static verify method to the Certificate mock itself
+(Certificate as any).verify = certificateStaticVerifyMock;
+
+// Mock for Transaction
+export const Transaction = jest.fn().mockImplementation(() => ({
+  id: 'mockTxId1234567890abcdef',
+  inputs: [],
+  outputs: [],
+  addInput: jest.fn(),
+  addOutput: jest.fn(),
+  sign: jest.fn().mockReturnThis(), // Or mockResolvedValue(true) if it's async
+  serialize: jest.fn(() => 'mockSerializedTxHex'),
+  fee: 1000, // Example property
+  isFullySigned: jest.fn(() => true)
+}));
+
+// Alias VerifiableCertificate to Certificate for compatibility if tests use it
+export const VerifiableCertificate = Certificate;
+
+// Mock for PushDrop (if it's used in the code under test directly or indirectly)
 export const PushDrop = {
   decode: jest.fn((script: any) => {
+    // This is a basic mock. If your tests depend on specific PushDrop behavior,
+    // you might need to make this more sophisticated.
     if (script && typeof script.toString === 'function' && script.toString('hex') === 'INVALID_EMPTY_SCRIPT_HEX_FOR_TEST') {
-      return { fields: []  };
+      return { fields: [] }; // Simulate empty fields for a specific invalid script
     }
     return {
-      fields: [Buffer.from(JSON.stringify({ 
-        type: ['VerifiableCredential', 'BirthCertificate'],
-        serialNumber: 'SERIAL12345',
-        subject: { name: 'Mock Subject' },
-        issuer: { name: 'Mock Issuer' },
-        validFrom: '2023-01-01',
-        validUntil: '2028-01-01',
-        customField: 'CustomValue123'
-      }))]
+      fields: [
+        Buffer.from('mock_field1_data_from_pushdrop'),
+        Buffer.from('mock_field2_data_from_pushdrop')
+      ],
+      lockingScript: { toHex: () => 'mockLockingScriptHexFromPushDrop' },
+      unlockingScript: { toHex: () => 'mockUnlockingScriptHexFromPushDrop' }
     };
   })
 };
 
-// Define the shape of the instance Script creates
-type MockScriptInstance = {
-  toHex: jest.Mock<() => "INVALID_EMPTY_SCRIPT_HEX_FOR_TEST" | "mockScriptHex">;
-  toString: jest.Mock<(format?: "hex" | "asm") => string>;
-};
-
-// Define the type of the Script constructor
-type ScriptConstructorMock = new (asm?: string) => MockScriptInstance;
-
-// Define the actual implementation for the constructor logic
-const scriptConstructorLogic = (asm?: string): MockScriptInstance => {
-  return {
-    toHex: jest.fn(() => asm === '' ? 'INVALID_EMPTY_SCRIPT_HEX_FOR_TEST' : 'mockScriptHex'),
-    toString: jest.fn((format?: 'hex' | 'asm') => {
-      if (format === 'hex') {
-        return asm === '' ? 'INVALID_EMPTY_SCRIPT_HEX_FOR_TEST' : 'mockScriptHex';
-      }
-      return asm || 'MOCK_ASM_SCRIPT';
-    }),
-  };
-};
-
-export const Script = jest.fn(scriptConstructorLogic) as unknown as ScriptConstructorMock;
-
-export const Signature = {
-  fromDER: jest.fn(() => ({ toDER: () => 'mockDERString' })),
-  fromRS: jest.fn(() => ({ toDER: () => 'mockDERString' }))
-};
-
-// Mock for Transaction instance methods
-const mockTransactionInstance = {
-  sign: jest.fn(() => Promise.resolve(mockTransactionInstance)), // Often returns itself or void
-  toHex: jest.fn(() => 'mockTransactionHex_010203abcdef'),
-  broadcast: jest.fn(() => Promise.resolve({ txid: 'mocktxid123abc', status: 'success' })),
-  // Add other instance methods if needed, e.g.:
-  // addInput: jest.fn(() => mockTransactionInstance),
-  // addOutput: jest.fn(() => mockTransactionInstance),
-  // verify: jest.fn(() => true),
-  // fee: jest.fn(() => 1000),
-  // id: 'mockTxIdInstance',
-};
-
-// An instance of a mock certificate, for tests that need to import a ready-made instance
-export const mockCertificateInstance = {
-  type: ['VerifiableCredential', 'MockInstanceCredential'],
-  serialNumber: 'mockInstanceSerial123',
-  subject: { commonName: 'Mock Instance Subject' },
-  issuer: { commonName: 'Mock Instance Issuer' }, // 'certifier' in some contexts might map to 'issuer'
-  validFrom: '2024-01-01T00:00:00Z',
-  validUntil: '2025-01-01T00:00:00Z',
-  keyring: { getSigningPublicKey: () => 'mockInstanceSigningPublicKey' },
-  signature: 'mockInstanceDigitalSignature123',
-  verify: jest.fn(() => true), // Instance verify method
-  decryptFields: jest.fn(async (_key?: any) => ({ // Make _key optional to align with test usage
-    defaultDecryptedField: 'defaultDecryptedValue',
-    // This will often be overridden in tests, but a default mock is good.
-  })),
-  getField: jest.fn((fieldName: string) => `mockInstanceFieldValue_${fieldName}`),
-  encode: jest.fn(() => 'encodedMockCertificateInstanceData'),
-  // Add any other methods if tests show they are needed on this specific instance
-};
-
-// Mock for Transaction static methods (and potentially constructor if used with `new`)
-export const Transaction = {
-  fromHex: jest.fn((_hex: string) => mockTransactionInstance),
-  // If Transaction is instantiated with `new Transaction()`, you might need:
-  // new: jest.fn(() => mockTransactionInstance) and then adjust the export like other constructors.
-  // For now, assuming static fromHex is the primary usage.
-};
-
-export const Utils = {
-  someUtilityFunction: jest.fn(() => 'mockedUtilValue'),
-  toArray: jest.fn((str: string): Uint8Array => {
-    const arr = new Uint8Array(str.length);
-    for (let i = 0; i < str.length; i++) {
-      arr[i] = str.charCodeAt(i);
-    }
-    return arr;
-  }),
-  toUTF8: jest.fn((bytes: Uint8Array | Buffer | number[]): string => {
-    if (!bytes || bytes.length === 0) return '';
-    let result = '';
-    const byteArray = bytes instanceof Uint8Array || Buffer.isBuffer(bytes) ? bytes : new Uint8Array(bytes);
-    for (let i = 0; i < byteArray.length; i++) {
-      result += String.fromCharCode(byteArray[i]);
-    }
-    return result;
-  }),
-};
-
-export const ProtoWallet = jest.fn().mockImplementation((config) => {
-  return {
-    config: config,
-  };
-});
-
-// New exportable mock for VerifiableCertificate's decryptFields
-export const mockDecryptFieldsForVerifiableCertificate = jest.fn(async (_key?: any) => ({
-  defaultInternalVCField: 'defaultInternalVCValue' // A distinct default
-}));
-
-export const VerifiableCertificate = jest.fn().mockImplementation((type, serialNumber, subject, issuer, validFrom, validUntil, keyring, signature) => {
-  return {
-    type: type || ['VerifiableCredential', 'CustomTestCredential'],
-    serialNumber: serialNumber || 'mockVCSerialNumber123',
-    subject: subject || { commonName: 'Mock Subject Common Name' },
-    issuer: issuer || { commonName: 'Mock Issuer Common Name' },
-    validFrom: validFrom || '2024-01-01T00:00:00Z',
-    validUntil: validUntil || '2025-01-01T00:00:00Z',
-    keyring: keyring || { getSigningPublicKey: () => 'mockSigningPublicKey' },
-    signature: signature || 'mockDigitalSignature123',
-    verify: jest.fn(() => true), 
-    decryptFields: mockDecryptFieldsForVerifiableCertificate, // Use the new exportable mock
-    getField: jest.fn((fieldName) => {
-      if (fieldName === 'customField') return 'mockCustomFieldValue';
-      return 'defaultMockFieldValue';
-    }),
-    encode: jest.fn(() => 'encodedMockVCInstanceData')
-  };
-});
-
 export const toBase58 = jest.fn((data: Uint8Array): string => {
-  let str = 'z';
-  for (let i = 0; i < Math.min(data.length, 10); i++) {
-    str += String.fromCharCode(65 + (data[i] % 26));
+  let str = 'z'; // Start with 'z' to ensure it's a valid base58 char if data is empty or short
+  for (let i = 0; i < Math.min(data.length, 10); i++) { // Limit length for simplicity
+    str += String.fromCharCode(65 + (data[i] % 26)); // Mock simple encoding
   }
   return str;
 });
 
 export const fromBase58 = jest.fn((str: string): Uint8Array => {
-  const arr = new Uint8Array(str.length -1);
-  for (let i = 1; i < str.length; i++) {
-    arr[i-1] = str.charCodeAt(i) - 65;
+  const arr = new Uint8Array(Math.max(0, str.length - 1)); // Handle empty string case for str.length-1
+  for (let i = 1; i < str.length; i++) { // Start from 1 if 'z' prefix is assumed
+    arr[i-1] = (str.charCodeAt(i) - 65 + 256) % 256; // Ensure positive result before modulo
   }
   return arr;
 });
 
-export const __esModule = true;
+export const __esModule = true; // CommonJS/ESM interop hint for Jest

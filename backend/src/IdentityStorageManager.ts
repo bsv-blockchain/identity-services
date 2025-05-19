@@ -224,25 +224,7 @@ export class IdentityStorageManager {
     if (record?.certificate) {
       const storedCert = record.certificate
 
-      let sdkCertType: string
-      if (Array.isArray(storedCert.type) && storedCert.type.length > 1) {
-        sdkCertType = storedCert.type[1]
-      } else if (Array.isArray(storedCert.type) && storedCert.type.length === 1) {
-        sdkCertType = storedCert.type[0]
-      } else {
-        sdkCertType = 'Unknown'
-        if (Array.isArray(storedCert.type) && storedCert.type.length > 0) sdkCertType = storedCert.type[0]
-      }
-
-      const sdkCertInstance = new SDKCertificate(
-        sdkCertType,
-        storedCert.serialNumber,
-        storedCert.subject,
-        storedCert.certifier,
-        storedCert.revocationOutpoint,
-        storedCert.fields,
-        undefined
-      )
+      const sdkCertInstance = new SDKCertificate(storedCert)
 
       if (await sdkCertInstance.verify()) {
         return sdkCertInstance
