@@ -23,9 +23,9 @@
     }
   },
   "scripts": {
-    "test": "npm run build && jest",
-    "test:watch": "npm run build && jest --watch",
-    "test:coverage": "npm run build && jest --coverage",
+    "test": "npm run build && jest --config jest.config.cjs",
+    "test:watch": "npm run build && jest --config jest.config.cjs --watch",
+    "test:coverage": "npm run build && jest --config jest.config.cjs --coverage",
     "lint": "ts-standard --fix src/**/*.ts",
     "build": "tsc -b",
     "prepublish": "npm run build",
@@ -44,8 +44,8 @@
     "typescript": "^5.2.2"
   },
   "dependencies": {
-    "@bsv/overlay": "^0.6.1",
-    "@bsv/sdk": "^2.0.0",
+    "@bsv/overlay": "^2.0.2",
+    "@bsv/sdk": "^2.0.5",
     "knex": "^3.1.0",
     "mongodb": "^6.11.0"
   }

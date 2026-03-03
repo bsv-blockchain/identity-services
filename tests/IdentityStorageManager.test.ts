@@ -25,6 +25,8 @@ describe('IdentityStorageManager', () => {
     // The `find` method returns a cursor-like object which can chain `project(...).toArray()`
     const mockCursor = {
       project: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
       toArray: jest.fn().mockResolvedValue([])
     }
     mockCollection.find.mockReturnValue(mockCursor as any)
@@ -42,6 +44,15 @@ describe('IdentityStorageManager', () => {
   describe('constructor', () => {
     it('should create and store the collection', () => {
       expect(mockDb.collection).toHaveBeenCalledWith('identityRecords')
+    })
+
+    it('should create indexes for common lookup query patterns', () => {
+      expect(mockCollection.createIndex).toHaveBeenCalledWith({ txid: 1, outputIndex: 1 }, { unique: true })
+      expect(mockCollection.createIndex).toHaveBeenCalledWith({ 'certificate.serialNumber': 1 })
+      expect(mockCollection.createIndex).toHaveBeenCalledWith({ 'certificate.subject': 1 })
+      expect(mockCollection.createIndex).toHaveBeenCalledWith({ 'certificate.certifier': 1 })
+      expect(mockCollection.createIndex).toHaveBeenCalledWith({ 'certificate.subject': 1, 'certificate.certifier': 1 })
+      expect(mockCollection.createIndex).toHaveBeenCalledWith({ 'certificate.subject': 1, 'certificate.type': 1 })
     })
 
     it('should create a text index on searchableAttributes', () => {
@@ -211,15 +222,13 @@ describe('IdentityStorageManager', () => {
   })
 
   describe('findByCertificateType', () => {
-    it('should return empty array if parameters are missing or empty', async () => {
+    it('should return empty array if required parameters are missing or empty', async () => {
       const result1 = await manager.findByCertificateType(undefined as any, 'someKey', ['cert1'])
       const result2 = await manager.findByCertificateType([], 'someKey', ['cert1'])
       const result3 = await manager.findByCertificateType(['type1'], undefined as any, ['cert1'])
-      const result4 = await manager.findByCertificateType(['type1'], 'someKey', [])
       expect(result1).toEqual([])
       expect(result2).toEqual([])
       expect(result3).toEqual([])
-      expect(result4).toEqual([])
       expect(mockCollection.find).not.toHaveBeenCalled()
     })
 
@@ -240,6 +249,27 @@ describe('IdentityStorageManager', () => {
       const results = await manager.findByCertificateType(types, identityKey, certifiers)
       expect(mockCollection.find).toHaveBeenCalled()
       expect(results).toEqual([{ txid: 'typeTxid', outputIndex: 7 }])
+    })
+
+    it('should find by certificateType and identityKey without certifiers (across certifiers)', async () => {
+      const types = ['AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA']
+      const identityKey = '022222222222222222222222222222222222222222222222222222222222222222'
+
+      // Setup mock
+      const mockCursor = {
+        project: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue([
+          { txid: 'typeTxidNoCertifier', outputIndex: 8 }
+        ])
+      }
+      mockCollection.find.mockReturnValue(mockCursor as any)
+
+      const results = await manager.findByCertificateType(types, identityKey)
+      expect(mockCollection.find).toHaveBeenCalledWith({
+        'certificate.subject': identityKey,
+        'certificate.type': { $in: types }
+      })
+      expect(results).toEqual([{ txid: 'typeTxidNoCertifier', outputIndex: 8 }])
     })
   })
 
@@ -274,6 +304,8 @@ describe('IdentityStorageManager', () => {
 
       const mockCursor = {
         project: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
         toArray: jest.fn().mockResolvedValue([
           { txid: 'qTxid1', outputIndex: 9 },
           { txid: 'qTxid2', outputIndex: 10 }
@@ -288,6 +320,29 @@ describe('IdentityStorageManager', () => {
       expect(results).toEqual([
         { txid: 'qTxid1', outputIndex: 9 },
         { txid: 'qTxid2', outputIndex: 10 }
+      ])
+    })
+
+    it('should apply limit and offset to cursor when provided', async () => {
+      const testQuery = { 'certificate.subject': 'someIdentityKey' }
+
+      const mockCursor = {
+        project: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue([
+          { txid: 'qTxid3', outputIndex: 11 }
+        ])
+      }
+      mockCollection.find.mockReturnValue(mockCursor as any)
+
+      const results = await (manager as any).findRecordWithQuery(testQuery, 3, 4)
+      expect(mockCollection.find).toHaveBeenCalledWith(testQuery)
+      expect(mockCursor.project).toHaveBeenCalledWith({ txid: 1, outputIndex: 1 })
+      expect(mockCursor.limit).toHaveBeenCalledWith(3)
+      expect(mockCursor.skip).toHaveBeenCalledWith(4)
+      expect(results).toEqual([
+        { txid: 'qTxid3', outputIndex: 11 }
       ])
     })
   })

@@ -1,81 +1,89 @@
-import { IdentityTopicManager } from '../backend/src/IdentityTopicManager'
-import type { AdmittanceInstructions } from '@bsv/overlay'
+import IdentityTopicManager from '../backend/src/IdentityTopicManager'
 import docs from '../backend/src/docs/IdentityTopicManagerDocs.md'
 import {
-  // We'll still import them as though they're real,
-  // but under the hood we've mocked them below.
-  Transaction,
+  ProtoWallet,
   PushDrop,
-  KeyDeriver,
+  Transaction,
+  Utils,
   VerifiableCertificate
 } from '@bsv/sdk'
 
-// Primary mock: mock all needed pieces from '@bsv/ sdk' here
 jest.mock('@bsv/sdk', () => {
-  // Create a mock for VerifiableCertificate
-  const VerifiableCertificateMock = jest.fn().mockImplementation(function (this: any, ...args: any[]) {
-    this.type = args[0]
-    this.serialNumber = args[1]
-    this.subject = args[2]
-    this.certifier = args[3]
-    this.revocationOutpoint = args[4]
-    this.fields = args[5]
-    // signature is possibly the 7th argument if keyring is the 6th
-    this.keyring = args[6]
-    this.signature = args[7]
-    this.decryptedFields = args[8]
-
-    // Mock methods
-    this.verify = jest.fn()
-    this.decryptFields = jest.fn()
-  })
-
   return {
-    // Mock Transaction.fromBEEF
     Transaction: {
       fromBEEF: jest.fn()
     },
-
-    // Mock PushDrop.decode
     PushDrop: {
       decode: jest.fn()
     },
-
-    // Mock KeyDeriver
-    KeyDeriver: jest.fn().mockImplementation(() => {
-      return {
-        derivePublicKey: jest.fn(),
-        derivePrivateKey: jest.fn(),
-        deriveSymmetricKey: jest.fn(),
-        revealCounterpartySecret: jest.fn(),
-        revealSpecificSecret: jest.fn()
-      }
-    }),
-
-    // Mock VerifiableCertificate (our newly created mock class)
-    VerifiableCertificate: VerifiableCertificateMock,
-
-    // Optionally mock these if used:
-    Signature: {
-      fromDER: jest.fn()
-    },
     Utils: {
       toUTF8: jest.fn()
-    }
+    },
+    ProtoWallet: jest.fn(),
+    VerifiableCertificate: jest.fn()
   }
 })
 
-// After mocking, we can use the actual references in code:
 const mockConsoleError = jest.spyOn(console, 'error').mockImplementation(() => { })
 const mockConsoleLog = jest.spyOn(console, 'log').mockImplementation(() => { })
 const mockConsoleWarn = jest.spyOn(console, 'warn').mockImplementation(() => { })
 
+const MockedProtoWallet = ProtoWallet as unknown as jest.MockedClass<typeof ProtoWallet>
+const MockedVerifiableCertificate = VerifiableCertificate as unknown as jest.MockedClass<typeof VerifiableCertificate>
+const mockFromBEEF = Transaction.fromBEEF as jest.Mock
+const mockDecode = PushDrop.decode as jest.Mock
+const mockToUTF8 = Utils.toUTF8 as jest.Mock
+
+const buildParsedTransaction = (outputCount: number) => ({
+  inputs: [{ sourceTXID: 'prev', sourceOutputIndex: 0 }],
+  outputs: Array.from({ length: outputCount }, () => ({ lockingScript: [1, 2, 3] })),
+  id: jest.fn().mockReturnValue('test-txid')
+})
+
+const buildValidCertificateJSON = () => JSON.stringify({
+  type: 'testType',
+  serialNumber: 'serial',
+  subject: 'subject-pubkey',
+  certifier: 'certifier-pubkey',
+  revocationOutpoint: 'revocationTxid.0',
+  fields: { firstName: 'Alice' },
+  keyring: { firstName: 'encrypted' },
+  signature: 'signature'
+})
+
+const getConsoleErrorMessages = (): string[] => {
+  return mockConsoleError.mock.calls.map(call => String(call[0]))
+}
+
 describe('IdentityTopicManager', () => {
   let manager: IdentityTopicManager
+  let verifySignatureMock: jest.Mock
+  let certificateVerifyMock: jest.Mock
+  let decryptFieldsMock: jest.Mock
 
   beforeEach(() => {
     jest.clearAllMocks()
     manager = new IdentityTopicManager()
+
+    verifySignatureMock = jest.fn().mockResolvedValue({ valid: true })
+    MockedProtoWallet.mockImplementation(() => ({
+      verifySignature: verifySignatureMock
+    } as any))
+
+    certificateVerifyMock = jest.fn().mockResolvedValue(true)
+    decryptFieldsMock = jest.fn().mockResolvedValue({ firstName: 'Alice' })
+    MockedVerifiableCertificate.mockImplementation(() => ({
+      verify: certificateVerifyMock,
+      decryptFields: decryptFieldsMock
+    } as any))
+
+    mockToUTF8.mockReturnValue(buildValidCertificateJSON())
+  })
+
+  afterAll(() => {
+    mockConsoleError.mockRestore()
+    mockConsoleLog.mockRestore()
+    mockConsoleWarn.mockRestore()
   })
 
   describe('getDocumentation', () => {
@@ -96,12 +104,114 @@ describe('IdentityTopicManager', () => {
   })
 
   describe('identifyAdmissibleOutputs', () => {
-    it.todo('should throw if the parsed transaction has no inputs')
-    it.todo('should throw if the parsed transaction has no outputs')
-    it.todo('should admit no outputs if none are valid and throw an error, then console.error if previousCoins is empty')
-    it.todo('should admit no outputs if none are valid but not throw error if previousCoins is non-empty, only logs a warning')
-    it.todo('should parse and admit multiple valid outputs, ignoring invalid ones')
-    it.todo('should handle a valid single output and console log correctly, also return correct instructions')
-    it.todo('should not rethrow errors from certain outputs if at least one output is valid, partial success scenario')
+    it('should return no admitted outputs and log error/warn when parsed transaction has no inputs', async () => {
+      mockFromBEEF.mockReturnValue({
+        inputs: [],
+        outputs: [{ lockingScript: [1, 2, 3] }],
+        id: jest.fn().mockReturnValue('test-txid')
+      })
+
+      const result = await manager.identifyAdmissibleOutputs([1, 2, 3], [])
+
+      expect(result).toEqual({ outputsToAdmit: [], coinsToRetain: [] })
+      expect(mockDecode).not.toHaveBeenCalled()
+      expect(getConsoleErrorMessages()).toContain('Error identifying admissible outputs:')
+      expect(mockConsoleWarn).toHaveBeenCalledWith('No Identity outputs admitted, and no previous Identity coins were consumed.')
+    })
+
+    it('should return no admitted outputs and log error/warn when parsed transaction has no outputs', async () => {
+      mockFromBEEF.mockReturnValue({
+        inputs: [{ sourceTXID: 'prev', sourceOutputIndex: 0 }],
+        outputs: [],
+        id: jest.fn().mockReturnValue('test-txid')
+      })
+
+      const result = await manager.identifyAdmissibleOutputs([1, 2, 3], [])
+
+      expect(result).toEqual({ outputsToAdmit: [], coinsToRetain: [] })
+      expect(mockDecode).not.toHaveBeenCalled()
+      expect(getConsoleErrorMessages()).toContain('Error identifying admissible outputs:')
+      expect(mockConsoleWarn).toHaveBeenCalledWith('No Identity outputs admitted, and no previous Identity coins were consumed.')
+    })
+
+    it('should return no admitted outputs and emit global error/warn when no outputs are valid and no previous coins are provided', async () => {
+      mockFromBEEF.mockReturnValue(buildParsedTransaction(1))
+      mockDecode.mockReturnValue({
+        fields: [[11], [22], [33], [44]]
+      })
+      verifySignatureMock.mockResolvedValue({ valid: false })
+
+      const result = await manager.identifyAdmissibleOutputs([1, 2, 3], [])
+
+      expect(result).toEqual({ outputsToAdmit: [], coinsToRetain: [] })
+      expect(getConsoleErrorMessages()).toContain('Error parsing output 0')
+      expect(getConsoleErrorMessages()).toContain('Error identifying admissible outputs:')
+      expect(mockConsoleWarn).toHaveBeenCalledWith('No Identity outputs admitted, and no previous Identity coins were consumed.')
+    })
+
+    it('should return no admitted outputs but avoid global error/warn when previous coins are provided', async () => {
+      mockFromBEEF.mockReturnValue(buildParsedTransaction(1))
+      mockDecode.mockReturnValue({
+        fields: [[11], [22], [33], [44]]
+      })
+      verifySignatureMock.mockResolvedValue({ valid: false })
+
+      const result = await manager.identifyAdmissibleOutputs([1, 2, 3], [42])
+
+      expect(result).toEqual({ outputsToAdmit: [], coinsToRetain: [] })
+      expect(getConsoleErrorMessages()).toContain('Error parsing output 0')
+      expect(getConsoleErrorMessages()).not.toContain('Error identifying admissible outputs:')
+      expect(mockConsoleWarn).not.toHaveBeenCalled()
+      expect(mockConsoleLog).toHaveBeenCalledWith('Consumed 1 previous Identity coin!')
+    })
+
+    it('should parse and admit multiple valid outputs while ignoring invalid outputs', async () => {
+      mockFromBEEF.mockReturnValue(buildParsedTransaction(3))
+      mockDecode
+        .mockImplementationOnce(() => ({ fields: [[1], [2], [3], [4]] }))
+        .mockImplementationOnce(() => {
+          throw new Error('Malformed output script')
+        })
+        .mockImplementationOnce(() => ({ fields: [[10], [20], [30], [40]] }))
+
+      const result = await manager.identifyAdmissibleOutputs([1, 2, 3], [])
+
+      expect(result).toEqual({ outputsToAdmit: [0, 2], coinsToRetain: [] })
+      expect(getConsoleErrorMessages()).toContain('Error parsing output 1')
+    })
+
+    it('should admit a valid single output and verify signature using expected payload', async () => {
+      mockFromBEEF.mockReturnValue(buildParsedTransaction(1))
+      mockDecode.mockReturnValue({
+        fields: [[10, 11], [20, 21], [30, 31], [99, 100]]
+      })
+
+      const result = await manager.identifyAdmissibleOutputs([1, 2, 3], [])
+
+      expect(result).toEqual({ outputsToAdmit: [0], coinsToRetain: [] })
+      expect(verifySignatureMock).toHaveBeenCalledWith({
+        data: [10, 11, 20, 21, 30, 31],
+        signature: [99, 100],
+        counterparty: 'subject-pubkey',
+        protocolID: [1, 'identity'],
+        keyID: '1'
+      })
+      expect(certificateVerifyMock).toHaveBeenCalledTimes(1)
+      expect(decryptFieldsMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('should continue after per-output failures and return partial success without rethrowing', async () => {
+      mockFromBEEF.mockReturnValue(buildParsedTransaction(2))
+      mockDecode
+        .mockImplementationOnce(() => {
+          throw new Error('Decode failed')
+        })
+        .mockImplementationOnce(() => ({ fields: [[7], [8], [9], [10]] }))
+
+      const result = await manager.identifyAdmissibleOutputs([1, 2, 3], [])
+
+      expect(result).toEqual({ outputsToAdmit: [1], coinsToRetain: [] })
+      expect(getConsoleErrorMessages()).toContain('Error parsing output 0')
+    })
   })
 })
