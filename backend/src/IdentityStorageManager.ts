@@ -77,6 +77,12 @@ export class IdentityStorageManager {
     return new RegExp(fuzzyPattern, 'i')
   }
 
+  private getExactCaseInsensitiveRegex(input: string): RegExp {
+    const escapedInput = this.normalizeSearchInput(input)
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return new RegExp(`^${escapedInput}$`, 'i')
+  }
+
   /**
    * Find one or more matching records by attribute
    * @param {IdentityAttributes} attributes certified attributes to query by
@@ -119,7 +125,7 @@ export class IdentityStorageManager {
         .filter(([, value]) => this.normalizeSearchInput(value).length > 0)
         .map(([key, value]) => ({
           [`certificate.fields.${key}`]: key === 'userName'
-            ? this.normalizeSearchInput(value)
+            ? this.getExactCaseInsensitiveRegex(value)
             : this.getFuzzyRegex(value)
         }))
 

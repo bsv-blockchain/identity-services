@@ -166,6 +166,17 @@ describe('IdentityStorageManager', () => {
       expect(fuzzyRegex?.test('braydenjlangley')).toBe(true)
     })
 
+    it('should match userName exactly and case-insensitively', async () => {
+      await manager.findByAttribute({ userName: 'swandiveblue27' })
+
+      const query = mockCollection.find.mock.calls[0][0] as QueryWithAnd
+      const userNameRegex = query.$and.find(condition => 'certificate.fields.userName' in condition)?.['certificate.fields.userName']
+      expect(userNameRegex).toBeInstanceOf(RegExp)
+      expect(userNameRegex?.test('Swandiveblue27')).toBe(true)
+      expect(userNameRegex?.test('swandiveblue27')).toBe(true)
+      expect(userNameRegex?.test('Swandiveblue27-extra')).toBe(false)
+    })
+
     it('should handle specific attributes (non-"any")', async () => {
       const attributes: IdentityAttributes = { firstName: 'Alice', lastName: 'Test' }
       const certifiers = ['cert1', 'cert2']
