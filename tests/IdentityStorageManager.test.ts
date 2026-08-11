@@ -6,6 +6,13 @@ import { IdentityStorageManager } from '../backend/src/IdentityStorageManager'
 import { IdentityRecord, IdentityAttributes } from '../backend/src/types'
 import { Certificate } from '@bsv/sdk'
 
+interface QueryWithAnd {
+  $and: Array<{
+    searchableAttributes?: RegExp
+    $text?: unknown
+  }>
+}
+
 describe('IdentityStorageManager', () => {
   let mockDb: jest.Mocked<Db>
   let mockCollection: jest.Mocked<Collection<IdentityRecord>>
@@ -117,8 +124,8 @@ describe('IdentityStorageManager', () => {
       expect(mockCollection.find).not.toHaveBeenCalled()
     })
 
-    it('should call findRecordWithQuery with "any" attribute for fuzzy search', async () => {
-      const attributes: IdentityAttributes = { any: 'Alice' }
+    it('should use literal substring matching for fuzzy any-attribute searches', async () => {
+      const attributes: IdentityAttributes = { any: 'ty@projectbabbage.com' }
       const certifiers = ['cert1']
 
       // Setup mock to return a known array
@@ -137,6 +144,26 @@ describe('IdentityStorageManager', () => {
         { txid: 'txidA', outputIndex: 0 },
         { txid: 'txidB', outputIndex: 1 }
       ])
+
+      const query = mockCollection.find.mock.calls[0][0] as QueryWithAnd
+      const searchCondition = query.$and.find(condition => 'searchableAttributes' in condition)
+      expect(searchCondition).toBeDefined()
+      expect(query.$and.some(condition => '$text' in condition)).toBe(false)
+
+      const fuzzyRegex = searchCondition?.searchableAttributes
+      expect(fuzzyRegex).toBeInstanceOf(RegExp)
+      expect(fuzzyRegex?.test('ty@projectbabbage.com')).toBe(true)
+      expect(fuzzyRegex?.test('TY@PROJECTBABBAGE.COM')).toBe(true)
+      expect(fuzzyRegex?.test('jackie@projectbabbage.com')).toBe(false)
+    })
+
+    it('should match a search prefix within a longer public attribute', async () => {
+      await manager.findByAttribute({ any: 'brayden' })
+
+      const query = mockCollection.find.mock.calls[0][0] as QueryWithAnd
+      const fuzzyRegex = query.$and.find(condition => 'searchableAttributes' in condition)?.searchableAttributes
+      expect(fuzzyRegex).toBeInstanceOf(RegExp)
+      expect(fuzzyRegex?.test('braydenjlangley')).toBe(true)
     })
 
     it('should handle specific attributes (non-"any")', async () => {

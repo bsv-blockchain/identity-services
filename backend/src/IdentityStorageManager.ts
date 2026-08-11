@@ -107,13 +107,12 @@ export class IdentityStorageManager {
         return []
       }
 
-      // Use text search for scalability (indexed via searchableAttributes text index).
-      // Keep regex fallback for very short queries where tokenization may be too coarse.
-      if (anySearch.length > 2) {
-        query.$and.push({ $text: { $search: anySearch } })
-      } else {
-        query.$and.push({ searchableAttributes: this.getFuzzyRegex(anySearch) })
-      }
+      // MongoDB text search is token-based rather than fuzzy. In particular, it
+      // splits email addresses at punctuation (so an exact email can match
+      // unrelated records through a token such as "com") and it cannot match a
+      // prefix such as "brayden" inside "braydenjlangley". Apply the same
+      // escaped, case-insensitive substring semantics used by named attributes.
+      query.$and.push({ searchableAttributes: this.getFuzzyRegex(anySearch) })
     } else {
       // Construct regex queries for specific fields
       const attributeQueries = Object.entries(attributes)
