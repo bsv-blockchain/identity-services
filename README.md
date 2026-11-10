@@ -127,4 +127,4 @@ Before production deploy:
 
 ## License
 
-[Open BSV License](./LICENSE.txt)
+[Apache License 2.0](LICENSE)
